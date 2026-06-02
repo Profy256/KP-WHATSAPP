@@ -18,20 +18,20 @@ export class AiController {
         return;
       }
 
-      let config = await prisma.aiConfig.findFirst({ where: { businessId: business.id } });
-
-      if (!config) {
-        config = await prisma.aiConfig.create({
-          data: {
-            businessId: business.id,
-            prompt: 'You are a helpful AI sales assistant for our business. Be concise and professional.',
-            isActive: false,
-            rules: [],
-            greetingEnabled: false,
-            greetingMessage: 'Thanks for contacting us! We will get back to you shortly.',
-          },
-        });
-      }
+      // Auto-create defaults on first read; upsert is race-safe under the
+      // unique businessId constraint.
+      const config = await prisma.aiConfig.upsert({
+        where: { businessId: business.id },
+        update: {},
+        create: {
+          businessId: business.id,
+          prompt: 'You are a helpful AI sales assistant for our business. Be concise and professional.',
+          isActive: false,
+          rules: [],
+          greetingEnabled: false,
+          greetingMessage: 'Thanks for contacting us! We will get back to you shortly.',
+        },
+      });
 
       res.status(200).json(config);
     } catch (error) {
@@ -50,18 +50,12 @@ export class AiController {
         return;
       }
 
-      let config = await prisma.aiConfig.findFirst({ where: { businessId: business.id } });
-
-      if (config) {
-        config = await prisma.aiConfig.update({
-          where: { id: config.id },
-          data: { prompt, isActive, rules, greetingEnabled, greetingMessage },
-        });
-      } else {
-        config = await prisma.aiConfig.create({
-          data: { businessId: business.id, prompt, isActive, rules, greetingEnabled, greetingMessage },
-        });
-      }
+      // businessId is unique — upsert keeps it one-to-one and is race-safe.
+      const config = await prisma.aiConfig.upsert({
+        where: { businessId: business.id },
+        update: { prompt, isActive, rules, greetingEnabled, greetingMessage },
+        create: { businessId: business.id, prompt, isActive, rules, greetingEnabled, greetingMessage },
+      });
 
       res.status(200).json(config);
     } catch (error) {

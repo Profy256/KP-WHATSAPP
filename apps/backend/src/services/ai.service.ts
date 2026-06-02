@@ -48,10 +48,14 @@ export class AiService {
     remoteJid: string,
     messageText: string,
     isNewContact: boolean,
+    allowAi: boolean,
     sendMessageCb: (text: string, source: string) => Promise<void>
   ) {
     const config = await prisma.aiConfig.findFirst({ where: { businessId } });
-    if (!config) return;
+    if (!config) {
+      console.log(`No AiConfig for business ${businessId} — nothing to auto-reply with.`);
+      return;
+    }
 
     // 1. Send greeting for brand-new contacts
     if (isNewContact && config.greetingEnabled && config.greetingMessage) {
@@ -59,26 +63,34 @@ export class AiService {
       return;
     }
 
-    if (!config.isActive) return;
+    if (!config.isActive) {
+      console.log(`AiConfig for business ${businessId} is inactive — skipping rules/AI reply.`);
+      return;
+    }
 
-    // 2. Check keyword rules first
-    if (config.rules) {
-      const rules = config.rules as Array<{ keyword: string; reply: string }>;
-      for (const rule of rules) {
-        if (messageText.toLowerCase().includes(rule.keyword.toLowerCase())) {
-          await sendMessageCb(rule.reply, 'RULE');
-          return;
-        }
+    // 2. Keyword rules take precedence for both packages.
+    const rules = Array.isArray(config.rules)
+      ? (config.rules as Array<{ keyword: string; reply: string }>)
+      : [];
+    for (const rule of rules) {
+      if (rule.keyword && messageText.toLowerCase().includes(rule.keyword.toLowerCase())) {
+        await sendMessageCb(rule.reply, 'RULE');
+        return;
       }
     }
 
-    // 3. Fall back to platform AI config (admin-managed)
-    if (config.prompt) {
+    // 3. No keyword matched.
+    if (allowAi) {
+      // AI packages answer every message with the model.
+      if (!config.prompt) return;
       const platformConfig = await prisma.platformConfig.findFirst({
         where: { isActive: true, isDefault: true },
       }) ?? await prisma.platformConfig.findFirst({ where: { isActive: true } });
 
-      if (!platformConfig) return;
+      if (!platformConfig) {
+        console.log(`No active PlatformConfig — cannot generate AI reply for business ${businessId}.`);
+        return;
+      }
 
       try {
         const reply = await this.callProvider(
@@ -94,6 +106,17 @@ export class AiService {
       } catch (error) {
         console.error(`AI error for business ${businessId}:`, error);
       }
+      return;
     }
+
+    // WhatsApp-bot package (no AI):
+    if (rules.length === 0) {
+      // No keywords set up → auto-reply to every message with the default text.
+      const fallback =
+        config.greetingMessage || 'Thanks for your message! We will get back to you shortly.';
+      await sendMessageCb(fallback, 'RULE');
+      return;
+    }
+    // Keywords were configured but none matched → stay silent (follow the keywords).
   }
 }

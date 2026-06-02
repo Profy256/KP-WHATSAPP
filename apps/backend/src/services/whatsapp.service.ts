@@ -24,11 +24,22 @@ export interface ConnectionState {
 // unavailable) before giving up and reporting FAILED.
 const MAX_RECONNECT_ATTEMPTS = 5;
 
+// Grace period after a customer message before the bot replies. If the owner
+// reads or answers the chat within this window, the auto-reply is cancelled.
+const AUTO_REPLY_DELAY_MS = 20_000;
+
 export class WhatsappService {
   private sessions: Map<string, ReturnType<typeof makeWASocket>> = new Map();
   private states: Map<string, ConnectionState> = new Map();
   private reconnectAttempts: Map<string, number> = new Map();
   private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
+  // Tracks the most recent in-flight credential write per business so the
+  // post-scan restart can flush it before reloading creds from the DB.
+  private credsSaves: Map<string, Promise<void>> = new Map();
+  // Auto-replies are deferred so the owner gets first crack at the chat.
+  // Keyed by `${businessId}:${remoteJid}`; cancelled if the owner reads or
+  // replies within the grace window. See scheduleAutoReply().
+  private pendingReplies: Map<string, NodeJS.Timeout> = new Map();
   private aiService: AiService = new AiService();
 
   private setState(businessId: string, patch: Partial<ConnectionState>) {
@@ -44,6 +55,7 @@ export class WhatsappService {
         existing.ev.removeAllListeners('connection.update');
         existing.ev.removeAllListeners('creds.update');
         existing.ev.removeAllListeners('messages.upsert');
+        existing.ev.removeAllListeners('chats.update');
         existing.end(undefined);
       } catch (err) {
         console.error(`Error tearing down socket for business ${businessId}:`, err);
@@ -55,6 +67,44 @@ export class WhatsappService {
       clearTimeout(timer);
       this.reconnectTimers.delete(businessId);
     }
+    // Drop any auto-replies queued against the socket we're tearing down.
+    for (const [key, pending] of this.pendingReplies) {
+      if (key.startsWith(`${businessId}:`)) {
+        clearTimeout(pending);
+        this.pendingReplies.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Pulls plain text out of an inbound Baileys message, unwrapping the
+   * containers WhatsApp now routinely uses (disappearing/ephemeral messages,
+   * view-once, document-with-caption). Without this, anything but a bare
+   * `conversation`/`extendedTextMessage` silently yields no text — and no reply.
+   */
+  private extractText(message: any): string | undefined {
+    if (!message) return undefined;
+
+    // Unwrap the common "envelope" message types, then re-read the inner content.
+    const inner =
+      message.ephemeralMessage?.message ||
+      message.viewOnceMessage?.message ||
+      message.viewOnceMessageV2?.message ||
+      message.viewOnceMessageV2Extension?.message ||
+      message.documentWithCaptionMessage?.message ||
+      message.editedMessage?.message;
+    if (inner) return this.extractText(inner);
+
+    return (
+      message.conversation ||
+      message.extendedTextMessage?.text ||
+      message.imageMessage?.caption ||
+      message.videoMessage?.caption ||
+      message.buttonsResponseMessage?.selectedDisplayText ||
+      message.listResponseMessage?.title ||
+      message.templateButtonReplyMessage?.selectedDisplayText ||
+      undefined
+    );
   }
 
   /** Maps a Baileys disconnect status code to a message the end-user can act on. */
@@ -110,7 +160,18 @@ export class WhatsappService {
       qrTimeout: 30_000,
     });
 
-    sock.ev.on('creds.update', saveCreds);
+    // Record each credential write so other paths (notably the 515 restart
+    // right after a QR scan) can await the latest persistence before reloading
+    // creds from the DB. The promise is stored synchronously, before any await,
+    // so it's guaranteed visible to the `connection: 'close'` handler that
+    // Baileys emits immediately after `creds.update`.
+    sock.ev.on('creds.update', () => {
+      const p = saveCreds().catch((err) => {
+        console.error(`Failed to persist credentials for business ${businessId}:`, err);
+      });
+      this.credsSaves.set(businessId, p);
+      return p;
+    });
 
     sock.ev.on('connection.update', async (update) => {
       // Wrapped so a transient DB/network error never becomes an unhandled
@@ -154,49 +215,166 @@ export class WhatsappService {
 
     sock.ev.on('messages.upsert', async (m) => {
       try {
-        const msg = m.messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+        // 'notify' = genuinely new messages. 'append'/'prepend' are history
+        // sync on (re)connect — replying to those would spam old chats.
+        if (m.type !== 'notify') return;
 
-        const remoteJid = msg.key.remoteJid;
-        const messageText =
-          msg.message.conversation || msg.message.extendedTextMessage?.text;
+        for (const msg of m.messages) {
+          if (!msg.message) continue;
 
-        if (!remoteJid || !messageText) return;
+          const remoteJid = msg.key.remoteJid;
+          // Skip groups, status broadcasts and newsletters — auto-reply is 1:1.
+          if (!remoteJid || remoteJid === 'status@broadcast' || remoteJid.endsWith('@g.us') || remoteJid.endsWith('@newsletter')) {
+            continue;
+          }
 
-        console.log(`Message for business ${businessId} from ${remoteJid}: ${messageText}`);
+          // The owner replied (from the phone or another linked device) — they're
+          // handling this chat, so drop any auto-reply we had queued for it.
+          if (msg.key.fromMe) {
+            this.cancelPendingReply(businessId, remoteJid, 'owner replied');
+            continue;
+          }
 
-        await prisma.messageLog.create({
-          data: {
-            businessId,
-            remoteJid,
-            direction: 'INCOMING',
-            content: messageText,
-            source: 'CUSTOMER',
-          },
-        });
+          const messageText = this.extractText(msg.message);
+          if (!messageText) {
+            console.log(
+              `No text extracted for business ${businessId} from ${remoteJid} (type: ${Object.keys(msg.message).join(',')})`,
+            );
+            continue;
+          }
 
-        const existingContact = await prisma.contact.findUnique({
-          where: { businessId_remoteJid: { businessId, remoteJid } },
-        });
-        const isNewContact = !existingContact;
-
-        const contact = await prisma.contact.upsert({
-          where: { businessId_remoteJid: { businessId, remoteJid } },
-          update: {},
-          create: { businessId, remoteJid },
-        });
-
-        if (contact.isAiPaused) {
-          console.log(`Skipping AI for paused contact ${remoteJid}`);
-          return;
+          await this.handleInboundText(businessId, remoteJid, messageText, msg.key.id || `${Date.now()}`);
         }
+      } catch (err) {
+        console.error(`messages.upsert handler failed for business ${businessId}:`, err);
+      }
+    });
 
+    // When the owner opens/reads a chat on their phone, WhatsApp syncs the
+    // read state to this linked device as a chat update with unreadCount 0.
+    // Treat that as "the owner has seen it" and cancel the queued auto-reply.
+    sock.ev.on('chats.update', (updates) => {
+      for (const u of updates) {
+        if (u.id && u.unreadCount === 0) {
+          this.cancelPendingReply(businessId, u.id, 'owner read the chat');
+        }
+      }
+    });
+
+    this.sessions.set(businessId, sock);
+
+    // Wait for the socket to actually produce something useful (a QR to scan,
+    // or a live connection) rather than returning a blind fixed delay. This is
+    // what makes the QR appear quickly instead of "taking long".
+    await this.waitForQrOrOpen(businessId);
+    return this.states.get(businessId) || { status: 'CONNECTING' };
+  }
+
+  /** Logs an inbound customer message and queues a (deferred) auto-reply. */
+  private async handleInboundText(
+    businessId: string,
+    remoteJid: string,
+    messageText: string,
+    messageId: string,
+  ) {
+    try {
+      console.log(`Message for business ${businessId} from ${remoteJid}: ${messageText}`);
+
+      await prisma.messageLog.create({
+        data: {
+          businessId,
+          remoteJid,
+          direction: 'INCOMING',
+          content: messageText,
+          source: 'CUSTOMER',
+        },
+      });
+
+      const existingContact = await prisma.contact.findUnique({
+        where: { businessId_remoteJid: { businessId, remoteJid } },
+      });
+      const isNewContact = !existingContact;
+
+      const contact = await prisma.contact.upsert({
+        where: { businessId_remoteJid: { businessId, remoteJid } },
+        update: {},
+        create: { businessId, remoteJid },
+      });
+
+      if (contact.isAiPaused) {
+        console.log(`Skipping AI for paused contact ${remoteJid}`);
+        return;
+      }
+
+      const business = await prisma.business.findUnique({ where: { id: businessId } });
+      const isAiPackage =
+        business?.selectedPackage === 'AI_AUTOMATION' || business?.selectedPackage === 'FULL';
+
+      // AI and keyword modes evaluate every message individually. The no-AI /
+      // no-keyword case sends an identical canned reply, so collapse a burst to
+      // one reply per contact (per grace window) to avoid spamming.
+      const config = await prisma.aiConfig.findUnique({ where: { businessId } });
+      const hasKeywords =
+        Array.isArray(config?.rules) && (config!.rules as unknown[]).length > 0;
+      const perMessage = isAiPackage || hasKeywords;
+
+      // Don't reply right away — give the owner the grace window to handle it.
+      this.scheduleAutoReply(
+        businessId,
+        remoteJid,
+        messageText,
+        isNewContact,
+        isAiPackage,
+        perMessage,
+        messageId,
+      );
+    } catch (err) {
+      console.error(`handleInboundText failed for business ${businessId}:`, err);
+    }
+  }
+
+  /**
+   * Queues an auto-reply to fire after AUTO_REPLY_DELAY_MS, cancelled if the
+   * owner reads the chat or replies first (see cancelPendingReply).
+   *
+   * When `perMessage` (AI packages, or no-AI with keywords), each message
+   * queues its own reply so every unseen message is evaluated. Otherwise
+   * (no-AI with no keywords → identical canned reply) at most one reply is
+   * queued per contact, honouring the first message's `isNewContact`.
+   */
+  private scheduleAutoReply(
+    businessId: string,
+    remoteJid: string,
+    messageText: string,
+    isNewContact: boolean,
+    allowAi: boolean,
+    perMessage: boolean,
+    messageId: string,
+  ) {
+    const contactPrefix = `${businessId}:${remoteJid}`;
+    // Deduped mode: one reply per contact — bail if one is already queued.
+    if (!perMessage && this.pendingReplies.has(contactPrefix)) return;
+    // Per-message mode: a message-scoped key lets several replies queue per contact.
+    const key = perMessage ? `${contactPrefix}:${messageId}` : contactPrefix;
+
+    const timer = setTimeout(async () => {
+      this.pendingReplies.delete(key);
+      try {
         await this.aiService.handleIncomingMessage(
           businessId,
           remoteJid,
           messageText,
           isNewContact,
+          allowAi,
           async (replyText, source) => {
+            // Resolve the live socket at send time — a reconnect may have
+            // replaced the one that received the message.
+            const sock = this.sessions.get(businessId);
+            if (!sock) {
+              console.log(`No live socket for business ${businessId}; dropping auto-reply to ${remoteJid}`);
+              return;
+            }
+            console.log(`Auto-reply (${source}) for business ${businessId} -> ${remoteJid}: ${replyText}`);
             await sock.sendMessage(remoteJid, { text: replyText });
             await prisma.messageLog.create({
               data: {
@@ -210,17 +388,35 @@ export class WhatsappService {
           },
         );
       } catch (err) {
-        console.error(`messages.upsert handler failed for business ${businessId}:`, err);
+        console.error(`Auto-reply failed for business ${businessId} -> ${remoteJid}:`, err);
       }
-    });
+    }, AUTO_REPLY_DELAY_MS);
 
-    this.sessions.set(businessId, sock);
+    this.pendingReplies.set(key, timer);
+    console.log(
+      `Auto-reply for ${remoteJid} queued in ${AUTO_REPLY_DELAY_MS}ms (cancels if owner reads/replies)`,
+    );
+  }
 
-    // Wait for the socket to actually produce something useful (a QR to scan,
-    // or a live connection) rather than returning a blind fixed delay. This is
-    // what makes the QR appear quickly instead of "taking long".
-    await this.waitForQrOrOpen(businessId);
-    return this.states.get(businessId) || { status: 'CONNECTING' };
+  /**
+   * Cancels every queued auto-reply for a contact because the owner is handling
+   * the chat. Matches both the WhatsApp-bot key (`${biz}:${jid}`) and the AI
+   * per-message keys (`${biz}:${jid}:${msgId}`).
+   */
+  private cancelPendingReply(businessId: string, remoteJid: string, reason: string) {
+    const exact = `${businessId}:${remoteJid}`;
+    const perMessagePrefix = `${exact}:`;
+    let cancelled = 0;
+    for (const [key, timer] of this.pendingReplies) {
+      if (key === exact || key.startsWith(perMessagePrefix)) {
+        clearTimeout(timer);
+        this.pendingReplies.delete(key);
+        cancelled++;
+      }
+    }
+    if (cancelled > 0) {
+      console.log(`Cancelled ${cancelled} queued auto-reply(ies) for ${remoteJid} (${reason})`);
+    }
   }
 
   /** Polls in-memory state until a QR is ready / connection opens / it fails, or ~10s elapse. */
@@ -254,7 +450,14 @@ export class WhatsappService {
       case DisconnectReason.restartRequired:
         // Expected immediately after a successful QR scan — just reconnect,
         // keeping the freshly saved credentials. Not a failure.
+        //
+        // The pairing `creds.update` fires moments before this close, but its
+        // DB write is async. We MUST let it finish before reconnecting, or
+        // `connectBusiness` reloads the stale pre-pairing creds (registered:
+        // false), shows a fresh QR, and the phone "fails to connect after
+        // scanning". Flush the pending write first.
         console.log(`Restart required for business ${businessId}, reconnecting...`);
+        await this.credsSaves.get(businessId)?.catch(() => {});
         this.connectBusiness(businessId).catch((err) =>
           console.error(`Restart reconnect failed for ${businessId}:`, err),
         );
