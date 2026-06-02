@@ -69,7 +69,7 @@ From the repo root:
 pnpm install
 ```
 
-This installs dependencies for both `apps/backend` and `apps/frontend` via the pnpm workspace.
+This installs dependencies for all workspace apps (`apps/backend`, `apps/frontend`, and `apps/admin`) via the pnpm workspace.
 
 ### Step 3 — Start the Database
 
@@ -207,6 +207,17 @@ You should see:
 - Local: http://localhost:3000
 ```
 
+### Step 9 — (Optional) Start the Admin Panel
+
+The admin panel is a separate Next.js app for platform management (businesses,
+users, AI configs, sessions, referrals, analytics). Open a third terminal in
+`apps/admin`:
+
+```bash
+cp .env.example .env.local   # points NEXT_PUBLIC_API_URL at the backend
+pnpm run dev                 # runs on http://localhost:3002
+```
+
 ---
 
 ## Access the App
@@ -214,6 +225,7 @@ You should see:
 | Service | URL |
 |---|---|
 | Frontend (dashboard) | [http://localhost:3000](http://localhost:3000) |
+| Admin panel | [http://localhost:3002](http://localhost:3002) |
 | Backend API | [http://localhost:3001/api](http://localhost:3001/api) |
 | Prisma Studio | [http://localhost:5555](http://localhost:5555) *(when running)* |
 

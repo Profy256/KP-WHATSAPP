@@ -43,9 +43,30 @@ const steps = [
   { num: '04', title: 'Go live', desc: 'Your AI starts responding to customers automatically.' },
 ];
 
+// schema.org structured data describing the product — helps search engines
+// match the site to "WhatsApp automation", "AI sales agent" and related queries.
+const softwareLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'KP WhatsApp Automation',
+  applicationCategory: 'BusinessApplication',
+  operatingSystem: 'Web',
+  description:
+    'AI-powered WhatsApp business automation: automatic WhatsApp replies, a 24/7 AI sales agent, AI customer support, and WhatsApp lead generation.',
+  keywords:
+    'WhatsApp automation, WhatsApp auto reply, WhatsApp chatbot, AI sales agent, AI customer support, WhatsApp sales bot, WhatsApp lead generation, conversational AI for business',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  author: { '@type': 'Person', name: 'Kafeero Proferious' },
+  creator: { '@type': 'Person', name: 'Kafeero Proferious' },
+};
+
 export default function LandingPage() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary)' }}>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareLd) }}
+      />
 
       {/* Nav */}
       <nav style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 48px', borderBottom: '1px solid var(--border-color)', position: 'sticky', top: 0, background: 'rgba(10,10,11,0.85)', backdropFilter: 'blur(12px)', zIndex: 100 }}>
@@ -155,6 +176,12 @@ export default function LandingPage() {
       {/* Footer */}
       <footer style={{ borderTop: '1px solid var(--border-color)', padding: '24px 48px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
         © @profy 2026 · KP WhatsApp Automation. All rights reserved.
+        <br />
+        Built by{' '}
+        <Link href="/contact" style={{ color: 'var(--accent-primary)' }}>
+          Kafeero Proferious
+        </Link>{' '}
+        — full-stack software engineer.
       </footer>
     </div>
   );

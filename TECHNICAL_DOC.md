@@ -43,7 +43,7 @@ The platform supports multiple concurrent business sessions, each fully isolated
 | Database | PostgreSQL |
 | ORM | Prisma |
 | AI providers | OpenAI, Anthropic (Claude), Google Gemini, DeepSeek, OpenRouter |
-| Frontend framework | Next.js 14 (App Router) |
+| Frontend framework | Next.js 16 (App Router) |
 | Frontend language | TypeScript + React |
 | HTTP client | Axios (via `src/lib/api.ts`) |
 | Auth | JWT stored as a browser cookie (`profy_token`, 7-day expiry) |
@@ -84,21 +84,32 @@ whatsapp-automation/
 │   │   │   └── index.ts               # Express app entry point
 │   │   ├── .env
 │   │   └── package.json
-│   └── frontend/
-│       └── src/
-│           ├── app/
-│           │   ├── page.tsx               # Login / Sign-up page
-│           │   ├── layout.tsx             # Root layout
-│           │   ├── globals.css            # Global styles + CSS variables
-│           │   └── dashboard/
-│           │       ├── layout.tsx         # Sidebar navigation
-│           │       ├── page.tsx           # Connect WhatsApp (QR)
-│           │       ├── settings/
-│           │       │   └── page.tsx       # Automation settings
-│           │       └── logs/
-│           │           └── page.tsx       # Inbox / live chat
-│           └── lib/
-│               └── api.ts                 # Axios instance with auth headers
+│   ├── frontend/
+│   │   └── src/
+│   │       ├── app/
+│   │       │   ├── page.tsx               # Public landing page (SEO)
+│   │       │   ├── layout.tsx             # Root layout + metadata + self-hosted font
+│   │       │   ├── globals.css            # Global styles + CSS variables
+│   │       │   ├── sitemap.ts             # Generated /sitemap.xml
+│   │       │   ├── robots.ts              # Generated /robots.txt
+│   │       │   ├── login/
+│   │       │   │   └── page.tsx           # Login / Sign-up page
+│   │       │   ├── contact/
+│   │       │   │   ├── page.tsx           # Server-rendered "Contact Developer" (SEO)
+│   │       │   │   └── ContactClient.tsx  # Interactive contact UI
+│   │       │   └── dashboard/
+│   │       │       ├── layout.tsx         # Sidebar navigation
+│   │       │       ├── page.tsx           # Connect WhatsApp (QR)
+│   │       │       ├── settings/
+│   │       │       │   └── page.tsx       # Automation settings
+│   │       │       └── logs/
+│   │       │           └── page.tsx       # Inbox / live chat
+│   │       └── lib/
+│   │           ├── api.ts                 # Axios instance with auth headers
+│   │           └── developer.ts           # Server-side developer profile + SITE_URL
+│   └── admin/                             # Next.js admin panel (port 3002)
+│       └── src/app/(dashboard)/           # Businesses, users, AI configs,
+│                                          # sessions, referrals, analytics, logs
 ├── docker-compose.yml
 ├── pnpm-workspace.yaml
 └── package.json
@@ -391,13 +402,17 @@ Baileys stores authentication credentials on disk:
 
 These files allow the platform to reconnect to WhatsApp without re-scanning a QR code on every server restart. The `Session` table in PostgreSQL tracks the current connection status (`CONNECTED` / `DISCONNECTED`) for display in the UI.
 
-On server restart, active sessions are not automatically reconnected — a QR scan or manual reconnect is required.
+On server restart, every business with saved credentials is automatically
+reconnected (`whatsappService.reconnectAll()` runs at startup). If a session's
+credentials are no longer valid — e.g. the user logged out from their phone
+(`loggedOut` / 401) — the stale credentials are wiped and the session is marked
+`FAILED` with a "scan the QR code again" message; no reconnect loop occurs.
 
 ---
 
 ## 11. Frontend Structure
 
-The frontend is a Next.js 14 App Router application.
+The frontend is a Next.js 16 App Router application.
 
 ### Pages
 

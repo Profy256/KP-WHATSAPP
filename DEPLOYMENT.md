@@ -151,6 +151,12 @@ In Vercel project settings → **Environment Variables**, add:
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | `https://kp-whatsapp-automation-backend.onrender.com/api` | Production |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:3001/api` | Development |
+| `NEXT_PUBLIC_SITE_URL` | `https://your-domain.com` (your real production domain) | Production |
+
+> `NEXT_PUBLIC_SITE_URL` drives canonical URLs, Open Graph tags, `/sitemap.xml`,
+> and `/robots.txt`. If unset it falls back to `https://kp-whatsapp.vercel.app`,
+> which makes search engines index the wrong host. After deploying, submit
+> `https://your-domain.com/sitemap.xml` in **Google Search Console**.
 
 ### 3.4 Deploy
 
@@ -339,6 +345,7 @@ Returns: { jwt: "your_jwt_token", user: {...} }
 | Variable | Required | Description |
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | Yes | Full backend API URL including `/api` |
+| `NEXT_PUBLIC_SITE_URL` | Recommended | Public site origin for canonical URLs, Open Graph, sitemap, and robots. Defaults to `https://kp-whatsapp.vercel.app` if unset. |
 
 ---
 

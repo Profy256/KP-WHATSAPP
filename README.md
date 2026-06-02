@@ -12,6 +12,7 @@ A multi-tenant WhatsApp automation platform. Connect your WhatsApp Business numb
 - **Manual Takeover** — Pause the AI for any individual customer and reply manually from the dashboard.
 - **Multi-Tenant** — Each business account has isolated sessions, AI configs, contacts, and message history.
 - **Transactional Email** — Welcome emails sent via Resend on signup.
+- **SEO-Ready** — Server-rendered public/contact pages with metadata, schema.org structured data, `sitemap.xml`, and `robots.txt` so the site and its developer are indexable.
 
 ## Tech Stack
 
@@ -42,7 +43,8 @@ A multi-tenant WhatsApp automation platform. Connect your WhatsApp Business numb
 kp-whatsapp-automation/
 ├── apps/
 │   ├── backend/          # Express API + Baileys + Prisma
-│   └── frontend/         # Next.js dashboard
+│   ├── frontend/         # Next.js dashboard (public site + customer app)
+│   └── admin/            # Next.js admin panel (port 3002)
 ├── render.yaml           # Render deployment config
 ├── docker-compose.yml    # Local PostgreSQL
 ├── DEPLOYMENT.md         # Step-by-step production deployment guide
@@ -157,5 +159,6 @@ See [`apps/backend/.env.example`](apps/backend/.env.example) for all variables.
 | Variable | Description |
 |---|---|
 | `NEXT_PUBLIC_API_URL` | Backend API base URL (including `/api`) |
+| `NEXT_PUBLIC_SITE_URL` | Public site origin — used for canonical URLs, Open Graph, sitemap, and robots. Set to the real production domain. |
 
 See [`apps/frontend/.env.example`](apps/frontend/.env.example) for all variables.
