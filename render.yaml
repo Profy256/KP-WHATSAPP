@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: kp-whatsapp-automation-backend
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install -g pnpm && pnpm install && cd apps/backend && npx prisma generate && pnpm run build
+    startCommand: cd apps/backend && node dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false

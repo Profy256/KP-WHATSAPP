@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  password     String?
+  name         String?
+  isAdmin      Boolean  @default(false)
+  referralCode String   @unique @default(uuid())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  businesses  Business[]
+  referrals   Referral[] @relation("Referrer")
+  referredBy  Referral?  @relation("Referee")
+}
+
+model Referral {
+  id         String   @id @default(uuid())
+  referrerId String
+  referrer   User     @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
+  refereeId  String   @unique
+  referee    User     @relation("Referee", fields: [refereeId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+}
+
+model Business {
+  id              String   @id @default(uuid())
+  name            String
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  selectedPackage String   @default("WHATSAPP_BOT") // WHATSAPP_BOT | AI_AUTOMATION | FULL
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  session     Session?
+  aiConfigs   AiConfig[]
+  messageLogs MessageLog[]
+  contacts    Contact[]
+}
+
+model Session {
+  id         String   @id @default(uuid())
+  businessId String   @unique
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  status     String   @default("DISCONNECTED") // DISCONNECTED, CONNECTING, CONNECTED
+  whatsappId String?
+  creds      Json?    // Baileys AuthenticationCreds — persisted so QR re-scan is never needed
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  keys SessionKey[]
+}
+
+// Stores Baileys signal keys (pre-keys, sender-keys, sessions, etc.) per business
+model SessionKey {
+  id         String  @id @default(uuid())
+  businessId String
+  keyType    String  // e.g. "pre-key", "session", "sender-key", "app-state-sync-key"
+  keyId      String  // key identifier within that type
+  keyData    Json    // serialised key data
+  sessionId  String?
+  session    Session? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, keyType, keyId])
+}
+
+// Developer/creator profile shown on the public /contact page — editable via admin
+model DeveloperProfile {
+  id          String   @id @default(uuid())
+  name        String   @default("Kafeero Proferious")
+  title       String   @default("Developer & Creator")
+  bio         String   @default("Full-stack developer specialising in WhatsApp automation, AI integrations, and SaaS platforms.")
+  email       String   @default("profy256@gmail.com")
+  phone       String   @default("+256740686937")
+  whatsapp    String   @default("256740686937")
+  location    String   @default("Uganda, East Africa")
+  avatarUrl   String?
+  skills      Json     @default("[]")   // string[]
+  services    Json     @default("[]")   // {icon,title,desc}[]
+  projects    Json     @default("[]")   // {name,desc,tech[],link}[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Platform-level AI config — managed by admin, used by all businesses on AI packages
+model PlatformConfig {
+  id         String   @id @default(uuid())
+  provider   String   // openai | anthropic | gemini | deepseek | openrouter
+  model      String
+  apiKey     String
+  isDefault  Boolean  @default(false)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model AiConfig {
+  id              String   @id @default(uuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  prompt          String?
+  isActive        Boolean  @default(false)
+  rules           Json?    // Array of { keyword: string, reply: string }
+  greetingEnabled Boolean  @default(false)
+  greetingMessage String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model MessageLog {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  remoteJid   String
+  direction   String   // INCOMING | OUTGOING
+  content     String
+  source      String   // CUSTOMER | AI | RULE | SYSTEM
+  createdAt   DateTime @default(now())
+}
+
+model Contact {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  remoteJid   String
+  name        String?
+  isAiPaused  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([businessId, remoteJid])
+}

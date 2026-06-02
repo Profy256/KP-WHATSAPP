@@ -1,0 +1,76 @@
+version: '3.8'
+
+# ── KP WhatsApp Automation — Full Stack ──────────────────────────────────────
+#
+# Local dev (database only):
+#   docker compose up postgres -d
+#
+# Full stack (all services):
+#   docker compose up --build
+#
+# Env vars are read from a root-level .env file. Copy .env.example to .env first.
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: kp-postgres
+    environment:
+      POSTGRES_USER: profy
+      POSTGRES_PASSWORD: profypassword
+      POSTGRES_DB: profy_db
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U profy -d profy_db']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Backend (Express + Baileys) ─────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: kp-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      # Internal Docker network URL — backend talks to postgres by service name
+      DATABASE_URL: postgresql://profy:profypassword@postgres:5432/profy_db?schema=public
+      DIRECT_URL: postgresql://profy:profypassword@postgres:5432/profy_db?schema=public
+      JWT_SECRET: ${JWT_SECRET:-change_this_to_a_long_random_secret}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM: ${RESEND_FROM:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    ports:
+      - '3001:3001'
+    restart: unless-stopped
+
+  # ── Frontend (Next.js) ──────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+      args:
+        # Browser makes API calls to this URL — must be publicly reachable
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001/api}
+    container_name: kp-frontend
+    depends_on:
+      - backend
+    environment:
+      NODE_ENV: production
+    ports:
+      - '3000:3000'
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

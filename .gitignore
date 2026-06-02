@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+
+# Environment variables — never commit real secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Build outputs
+.next/
+out/
+build/
+dist/
+/generated/prisma
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Baileys / WhatsApp auth artifacts (in case file-based auth is ever used)
+auth_info*/
+*.session
+
+# Secrets & keys
+*.pem
+*.key
+*.p12
+*credentials*.json
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.tsbuildinfo
+
+# Vercel
+.vercel
