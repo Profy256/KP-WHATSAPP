@@ -90,7 +90,7 @@ export default function AdminUsersPage() {
                   <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontSize: '14px' }}>{u._count?.referrals ?? 0}</td>
                   <td style={{ padding: '12px 16px', color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(u.createdAt).toLocaleDateString()}</td>
                   <td style={{ padding: '12px 16px' }}>
-                    <button onClick={() => toggleAdmin(u.id, u.isAdmin)} style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '100px', background: u.isAdmin ? 'rgba(82,84,248,0.15)' : 'var(--bg-tertiary)', color: u.isAdmin ? 'var(--accent-primary)' : 'var(--text-muted)', border: '1px solid var(--border-color)' }}>
+                    <button onClick={() => toggleAdmin(u.id, u.isAdmin)} style={{ fontSize: '11px', padding: '3px 10px', borderRadius: '100px', background: u.isAdmin ? 'rgba(37, 211, 102,0.15)' : 'var(--bg-tertiary)', color: u.isAdmin ? 'var(--accent-primary)' : 'var(--text-muted)', border: '1px solid var(--border-color)' }}>
                       {u.isAdmin ? 'Admin' : 'User'}
                     </button>
                   </td>

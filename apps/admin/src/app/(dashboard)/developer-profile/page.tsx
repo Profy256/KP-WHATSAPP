@@ -6,6 +6,23 @@ import { adminApi } from '@/lib/adminApi';
 interface Service { icon: string; title: string; desc: string }
 interface Project { name: string; desc: string; tech: string[]; link: string }
 
+// Hoisted to module scope so their identity is stable across renders.
+// Defining these inside the component recreated them on every keystroke,
+// which remounted the whole form and made the inputs lose focus / lag.
+const inp = (style?: object) => ({
+  width: '100%', padding: '9px 12px',
+  background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)',
+  borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: '13px', outline: 'none',
+  ...style,
+});
+
+const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '24px', marginBottom: '20px' }}>
+    <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>{title}</h3>
+    {children}
+  </div>
+);
+
 export default function DeveloperProfilePage() {
   const [profile, setProfile] = useState<any>(null);
   const [saving, setSaving] = useState(false);
@@ -79,20 +96,6 @@ export default function DeveloperProfilePage() {
 
   if (!profile) return <div style={{ color: 'var(--text-secondary)' }}>Loading...</div>;
 
-  const inp = (style?: object) => ({
-    width: '100%', padding: '9px 12px',
-    background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)',
-    borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: '13px', outline: 'none',
-    ...style,
-  });
-
-  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '24px', marginBottom: '20px' }}>
-      <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px' }}>{title}</h3>
-      {children}
-    </div>
-  );
-
   return (
     <div style={{ maxWidth: '800px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
@@ -162,7 +165,7 @@ export default function DeveloperProfilePage() {
       <Section title="Skills & Technologies">
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
           {(profile.skills || []).map((s: string, i: number) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', background: 'rgba(82,84,248,0.1)', border: '1px solid rgba(82,84,248,0.2)', borderRadius: '100px', fontSize: '13px', color: 'var(--accent-primary)' }}>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 10px', background: 'rgba(37, 211, 102,0.1)', border: '1px solid rgba(37, 211, 102,0.2)', borderRadius: '100px', fontSize: '13px', color: 'var(--accent-primary)' }}>
               {s}
               <button onClick={() => removeSkill(i)} style={{ color: 'var(--text-muted)', fontSize: '12px', lineHeight: 1 }}>✕</button>
             </div>

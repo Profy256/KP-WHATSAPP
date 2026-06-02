@@ -5,11 +5,29 @@ import { adminApi } from '@/lib/adminApi';
 
 const PROVIDERS = ['openai', 'anthropic', 'gemini', 'deepseek', 'openrouter'];
 const MODELS: Record<string, string[]> = {
-  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-mini'],
-  anthropic: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
-  gemini: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+  openai: [
+    'gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+    'gpt-4-turbo', 'gpt-4', 'o1', 'o1-mini', 'o3', 'o3-mini', 'o4-mini',
+    'gpt-3.5-turbo',
+  ],
+  anthropic: [
+    'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001',
+    'claude-3-7-sonnet-latest', 'claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest',
+    'claude-3-opus-latest', 'claude-3-haiku-20240307',
+  ],
+  gemini: [
+    'gemini-3.5-flash', 'gemini-3.0-flash',
+    'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite',
+    'gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-1.5-flash-8b',
+  ],
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-  openrouter: ['openai/gpt-4o', 'anthropic/claude-sonnet-4-6'],
+  openrouter: [
+    'openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4.1',
+    'anthropic/claude-opus-4-8', 'anthropic/claude-sonnet-4-6', 'anthropic/claude-3.5-sonnet',
+    'google/gemini-2.5-pro', 'google/gemini-2.0-flash-001',
+    'meta-llama/llama-3.3-70b-instruct', 'mistralai/mistral-large',
+    'deepseek/deepseek-chat', 'qwen/qwen-2.5-72b-instruct', 'x-ai/grok-2',
+  ],
 };
 
 const emptyConfig = { provider: 'openai', model: 'gpt-4o-mini', apiKey: '', isDefault: false, isActive: true };
@@ -134,7 +152,7 @@ export default function AdminAiConfigsPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ fontWeight: '600', fontSize: '14px' }}>{pc.provider}</span>
                   <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{pc.model}</span>
-                  {pc.isDefault && <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '100px', background: 'rgba(82,84,248,0.15)', color: 'var(--accent-primary)', fontWeight: '600' }}>Default</span>}
+                  {pc.isDefault && <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '100px', background: 'rgba(37, 211, 102,0.15)', color: 'var(--accent-primary)', fontWeight: '600' }}>Default</span>}
                   <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '100px', background: pc.isActive ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: pc.isActive ? 'var(--success)' : 'var(--error)', fontWeight: '600' }}>
                     {pc.isActive ? 'Active' : 'Inactive'}
                   </span>
@@ -145,7 +163,7 @@ export default function AdminAiConfigsPage() {
               </div>
               <div style={{ display: 'flex', gap: '6px' }}>
                 {!pc.isDefault && (
-                  <button onClick={() => setDefault(pc.id)} style={{ fontSize: '11px', padding: '4px 10px', background: 'rgba(82,84,248,0.1)', color: 'var(--accent-primary)', borderRadius: 'var(--radius-sm)' }}>Set Default</button>
+                  <button onClick={() => setDefault(pc.id)} style={{ fontSize: '11px', padding: '4px 10px', background: 'rgba(37, 211, 102,0.1)', color: 'var(--accent-primary)', borderRadius: 'var(--radius-sm)' }}>Set Default</button>
                 )}
                 <button onClick={() => setForm({ ...pc })} style={{ fontSize: '11px', padding: '4px 10px', background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>Edit</button>
                 <button onClick={() => deletePlatformConfig(pc.id)} style={{ fontSize: '11px', padding: '4px 10px', background: 'rgba(239,68,68,0.1)', color: 'var(--error)', borderRadius: 'var(--radius-sm)' }}>Delete</button>

@@ -71,7 +71,7 @@ export default function LandingPage() {
 
       {/* Hero */}
       <section style={{ textAlign: 'center', padding: '100px 24px 80px', maxWidth: '760px', margin: '0 auto' }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 14px', borderRadius: '100px', border: '1px solid rgba(82,84,248,0.4)', background: 'rgba(82,84,248,0.08)', fontSize: '13px', color: 'var(--accent-primary)', marginBottom: '32px' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 14px', borderRadius: '100px', border: '1px solid rgba(37, 211, 102,0.4)', background: 'rgba(37, 211, 102,0.08)', fontSize: '13px', color: 'var(--accent-primary)', marginBottom: '32px' }}>
           <Zap size={13} />
           AI-powered WhatsApp automation
         </div>
@@ -105,7 +105,7 @@ export default function LandingPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
           {features.map(({ icon: Icon, title, desc }) => (
             <div key={title} className="glass-panel" style={{ padding: '28px' }}>
-              <div style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', background: 'rgba(82,84,248,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', background: 'rgba(37, 211, 102,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
                 <Icon size={20} color="var(--accent-primary)" />
               </div>
               <h3 style={{ fontWeight: '600', marginBottom: '8px', fontSize: '16px' }}>{title}</h3>
@@ -122,7 +122,7 @@ export default function LandingPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {steps.map((step, i) => (
             <div key={step.num} style={{ display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
-              <div style={{ minWidth: '48px', height: '48px', borderRadius: '50%', background: 'rgba(82,84,248,0.1)', border: '1px solid rgba(82,84,248,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)', fontWeight: '700', fontSize: '14px' }}>
+              <div style={{ minWidth: '48px', height: '48px', borderRadius: '50%', background: 'rgba(37, 211, 102,0.1)', border: '1px solid rgba(37, 211, 102,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-primary)', fontWeight: '700', fontSize: '14px' }}>
                 {step.num}
               </div>
               <div style={{ paddingTop: '8px' }}>

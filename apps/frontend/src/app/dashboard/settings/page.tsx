@@ -149,7 +149,7 @@ export default function AutomationSettings() {
       {/* ─── AI Assistant ─── */}
       <div className="glass-panel" style={{ padding: '28px', marginBottom: '24px', opacity: aiEnabled ? 1 : 0.5 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-          <div style={{ background: 'rgba(82,84,248,0.1)', padding: '8px', borderRadius: 'var(--radius-sm)' }}><Bot size={20} color="var(--accent-primary)" /></div>
+          <div style={{ background: 'rgba(37, 211, 102,0.1)', padding: '8px', borderRadius: 'var(--radius-sm)' }}><Bot size={20} color="var(--accent-primary)" /></div>
           <div>
             <h2 style={{ fontSize: '16px', fontWeight: '600' }}>AI Assistant</h2>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>

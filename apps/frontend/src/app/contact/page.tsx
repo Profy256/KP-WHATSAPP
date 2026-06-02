@@ -74,7 +74,7 @@ export default function ContactPage() {
             <a href={`mailto:${profile.email}`} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '20px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', textDecoration: 'none', transition: 'border-color 0.15s' }}
               onMouseOver={e => (e.currentTarget.style.borderColor = 'var(--accent-primary)')}
               onMouseOut={e => (e.currentTarget.style.borderColor = 'var(--border-color)')}>
-              <div style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', background: 'rgba(82,84,248,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', flexShrink: 0 }}>✉️</div>
+              <div style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', background: 'rgba(37, 211, 102,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', flexShrink: 0 }}>✉️</div>
               <div>
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '3px' }}>Email</div>
                 <div style={{ fontSize: '14px', fontWeight: '500' }}>{profile.email}</div>
@@ -101,7 +101,7 @@ export default function ContactPage() {
               </div>
             </a>
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '20px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
-              <div style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', background: 'rgba(82,84,248,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', flexShrink: 0 }}>🌍</div>
+              <div style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm)', background: 'rgba(37, 211, 102,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', flexShrink: 0 }}>🌍</div>
               <div>
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '3px' }}>Location</div>
                 <div style={{ fontSize: '14px', fontWeight: '500' }}>{profile.location}</div>
@@ -134,7 +134,7 @@ export default function ContactPage() {
             <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '16px' }}>Skills & Technologies</h2>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
               {profile.skills.map((s, i) => (
-                <span key={i} style={{ padding: '6px 14px', background: 'rgba(82,84,248,0.1)', border: '1px solid rgba(82,84,248,0.2)', borderRadius: '100px', fontSize: '13px', color: 'var(--accent-primary)' }}>{s}</span>
+                <span key={i} style={{ padding: '6px 14px', background: 'rgba(37, 211, 102,0.1)', border: '1px solid rgba(37, 211, 102,0.2)', borderRadius: '100px', fontSize: '13px', color: 'var(--accent-primary)' }}>{s}</span>
               ))}
             </div>
           </div>
@@ -148,7 +148,7 @@ export default function ContactPage() {
               <div key={i} style={{ padding: '24px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', marginBottom: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                   <h3 style={{ fontSize: '16px', fontWeight: '700' }}>{p.name}</h3>
-                  {p.link && <Link href={p.link} style={{ fontSize: '13px', color: 'var(--accent-primary)', padding: '4px 12px', background: 'rgba(82,84,248,0.1)', borderRadius: 'var(--radius-sm)' }}>View →</Link>}
+                  {p.link && <Link href={p.link} style={{ fontSize: '13px', color: 'var(--accent-primary)', padding: '4px 12px', background: 'rgba(37, 211, 102,0.1)', borderRadius: 'var(--radius-sm)' }}>View →</Link>}
                 </div>
                 <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.5', marginBottom: '14px' }}>{p.desc}</p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>

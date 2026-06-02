@@ -61,7 +61,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px',
                   borderRadius: 'var(--radius-sm)', fontSize: '14px', fontWeight: active ? '600' : '400',
-                  background: active ? 'rgba(82,84,248,0.15)' : 'transparent',
+                  background: active ? 'rgba(37, 211, 102,0.15)' : 'transparent',
                   color: active ? 'var(--accent-primary)' : 'var(--text-secondary)',
                   transition: 'var(--transition-fast)',
                   borderLeft: active ? '2px solid var(--accent-primary)' : '2px solid transparent',

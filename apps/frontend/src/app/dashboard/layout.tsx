@@ -27,22 +27,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <h2 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '40px' }} className="gradient-text">KP WhatsApp Automation</h2>
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <Link href="/dashboard" style={{ textDecoration: 'none' }}>
-            <div style={{ padding: '10px 16px', background: pathname === '/dashboard' ? 'rgba(82, 84, 248, 0.1)' : 'transparent', color: pathname === '/dashboard' ? 'var(--accent-primary)' : 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', fontWeight: '500', transition: 'var(--transition-fast)' }}>
+            <div style={{ padding: '10px 16px', background: pathname === '/dashboard' ? 'rgba(37, 211, 102, 0.1)' : 'transparent', color: pathname === '/dashboard' ? 'var(--accent-primary)' : 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', fontWeight: '500', transition: 'var(--transition-fast)' }}>
               Connect WhatsApp
             </div>
           </Link>
           <Link href="/dashboard/settings" style={{ textDecoration: 'none' }}>
-            <div style={{ padding: '10px 16px', background: pathname === '/dashboard/settings' ? 'rgba(82, 84, 248, 0.1)' : 'transparent', color: pathname === '/dashboard/settings' ? 'var(--accent-primary)' : 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', fontWeight: '500', transition: 'var(--transition-fast)' }}>
+            <div style={{ padding: '10px 16px', background: pathname === '/dashboard/settings' ? 'rgba(37, 211, 102, 0.1)' : 'transparent', color: pathname === '/dashboard/settings' ? 'var(--accent-primary)' : 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', fontWeight: '500', transition: 'var(--transition-fast)' }}>
               Automation
             </div>
           </Link>
           <Link href="/dashboard/logs" style={{ textDecoration: 'none' }}>
-            <div style={{ padding: '10px 16px', background: pathname === '/dashboard/logs' ? 'rgba(82, 84, 248, 0.1)' : 'transparent', color: pathname === '/dashboard/logs' ? 'var(--accent-primary)' : 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', fontWeight: '500', transition: 'var(--transition-fast)' }}>
+            <div style={{ padding: '10px 16px', background: pathname === '/dashboard/logs' ? 'rgba(37, 211, 102, 0.1)' : 'transparent', color: pathname === '/dashboard/logs' ? 'var(--accent-primary)' : 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', fontWeight: '500', transition: 'var(--transition-fast)' }}>
               Inbox
             </div>
           </Link>
           <Link href="/dashboard/invite" style={{ textDecoration: 'none' }}>
-            <div style={{ padding: '10px 16px', background: pathname === '/dashboard/invite' ? 'rgba(82, 84, 248, 0.1)' : 'transparent', color: pathname === '/dashboard/invite' ? 'var(--accent-primary)' : 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', fontWeight: '500', transition: 'var(--transition-fast)' }}>
+            <div style={{ padding: '10px 16px', background: pathname === '/dashboard/invite' ? 'rgba(37, 211, 102, 0.1)' : 'transparent', color: pathname === '/dashboard/invite' ? 'var(--accent-primary)' : 'var(--text-secondary)', borderRadius: 'var(--radius-sm)', fontWeight: '500', transition: 'var(--transition-fast)' }}>
               Invite Friends
             </div>
           </Link>

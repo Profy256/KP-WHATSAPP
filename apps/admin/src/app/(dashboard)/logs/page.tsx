@@ -61,7 +61,7 @@ export default function AdminLogsPage() {
                 </td>
                 <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{log.remoteJid.split('@')[0]}</td>
                 <td style={{ padding: '10px 16px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: '600', padding: '2px 8px', borderRadius: '100px', background: log.direction === 'INCOMING' ? 'rgba(16,185,129,0.1)' : 'rgba(82,84,248,0.1)', color: log.direction === 'INCOMING' ? 'var(--success)' : 'var(--accent-primary)' }}>
+                  <span style={{ fontSize: '11px', fontWeight: '600', padding: '2px 8px', borderRadius: '100px', background: log.direction === 'INCOMING' ? 'rgba(16,185,129,0.1)' : 'rgba(37, 211, 102,0.1)', color: log.direction === 'INCOMING' ? 'var(--success)' : 'var(--accent-primary)' }}>
                     {log.direction === 'INCOMING' ? '↓ IN' : '↑ OUT'}
                   </span>
                 </td>

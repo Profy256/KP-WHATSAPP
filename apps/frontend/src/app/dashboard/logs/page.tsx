@@ -144,8 +144,8 @@ export default function ConversationLogs() {
                         maxWidth: '70%', 
                         padding: '12px 16px', 
                         borderRadius: 'var(--radius-md)', 
-                        background: msg.direction === 'INCOMING' ? 'var(--bg-tertiary)' : 'rgba(82, 84, 248, 0.1)',
-                        border: `1px solid ${msg.direction === 'INCOMING' ? 'var(--border-color)' : 'rgba(82, 84, 248, 0.2)'}`,
+                        background: msg.direction === 'INCOMING' ? 'var(--bg-tertiary)' : 'rgba(37, 211, 102, 0.1)',
+                        border: `1px solid ${msg.direction === 'INCOMING' ? 'var(--border-color)' : 'rgba(37, 211, 102, 0.2)'}`,
                         color: msg.direction === 'INCOMING' ? 'var(--text-primary)' : 'var(--text-primary)'
                       }}>
                         <div style={{ fontSize: '14px', lineHeight: '1.4' }}>{msg.content}</div>
