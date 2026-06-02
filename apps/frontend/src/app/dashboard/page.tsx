@@ -18,11 +18,19 @@ export default function Dashboard() {
   const [state, setState] = useState<ConnectionState>({ status: 'CONNECTING' });
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
+  // Surface a server-unreachable problem to the user instead of swallowing it.
+  const [connError, setConnError] = useState(false);
   // Avoid overlapping requests when a poll is still in flight.
   const inFlight = useRef(false);
+  // Remember that we showed a QR, so that a later QR-less CONNECTING means the
+  // phone scanned and we're linking — not that we're still generating a code.
+  const sawQr = useRef(false);
 
   const apply = (data: ConnectionState) => {
+    if (data.status === 'QR_READY' && data.qr) sawQr.current = true;
+    if (data.status === 'CONNECTED' || data.status === 'FAILED') sawQr.current = false;
     setState({ status: data.status, reason: data.reason, qr: data.qr ?? null });
+    setConnError(false);
     setLoading(false);
   };
 
@@ -37,6 +45,9 @@ export default function Dashboard() {
       apply(res.data);
     } catch (e) {
       console.error(e);
+      // Always give feedback: tell the user we lost contact with the server.
+      setConnError(true);
+      setLoading(false);
     } finally {
       inFlight.current = false;
     }
@@ -46,11 +57,13 @@ export default function Dashboard() {
     if (!Cookies.get('profy_token')) return;
     setRetrying(true);
     setLoading(true);
+    sawQr.current = false;
     try {
       const res = await api.post('/whatsapp/retry');
       apply(res.data);
     } catch (e) {
       console.error(e);
+      setConnError(true);
     } finally {
       setRetrying(false);
     }
@@ -67,6 +80,11 @@ export default function Dashboard() {
   const { status, reason, qr } = state;
   const isConnected = status === 'CONNECTED';
   const isFailed = status === 'FAILED';
+  // Caption for the in-progress (non-QR) states, so the user is never left
+  // guessing. After a scan the backend reconnects with no QR — say so.
+  const progressCaption = reason || (sawQr.current
+    ? 'QR scanned — linking your account…'
+    : 'Generating QR code…');
 
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto' }}>
@@ -74,6 +92,18 @@ export default function Dashboard() {
         <h1 style={{ fontSize: '32px', fontWeight: '700', marginBottom: '8px' }}>WhatsApp Connection</h1>
         <p style={{ color: 'var(--text-secondary)' }}>Link your WhatsApp Business account to enable AI automation.</p>
       </div>
+
+      {connError && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '10px',
+          background: 'rgba(245, 158, 11, 0.1)', border: '1px solid var(--warning, #f59e0b)',
+          color: 'var(--warning, #f59e0b)', padding: '12px 16px',
+          borderRadius: 'var(--radius-md)', marginBottom: '16px', fontSize: '14px',
+        }}>
+          <AlertTriangle size={18} />
+          Can&apos;t reach the server right now — retrying automatically…
+        </div>
+      )}
 
       <div className="glass-panel" style={{ padding: '40px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
         {isConnected ? (
@@ -123,7 +153,7 @@ export default function Dashboard() {
                 <div style={{ width: '256px', height: '256px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
                   <Loader2 size={48} color="var(--bg-primary)" style={{ animation: 'spin 1.2s linear infinite' }} />
                   <span style={{ color: 'var(--bg-primary)', fontSize: '14px' }}>
-                    {reason || 'Generating QR code...'}
+                    {progressCaption}
                   </span>
                 </div>
               ) : qr ? (
