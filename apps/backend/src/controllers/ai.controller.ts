@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { prisma } from '../prisma';
+import { aiConfigCache } from '../cache';
 
 export class AiController {
   constructor() {
@@ -33,6 +34,9 @@ export class AiController {
         },
       });
 
+      // First read may have just created the config; clear any cached `null`.
+      aiConfigCache.delete(business.id);
+
       res.status(200).json(config);
     } catch (error) {
       next(error);
@@ -56,6 +60,9 @@ export class AiController {
         update: { prompt, isActive, rules, greetingEnabled, greetingMessage },
         create: { businessId: business.id, prompt, isActive, rules, greetingEnabled, greetingMessage },
       });
+
+      // Drop the cached copy so the per-message path picks up the edit at once.
+      aiConfigCache.delete(business.id);
 
       res.status(200).json(config);
     } catch (error) {

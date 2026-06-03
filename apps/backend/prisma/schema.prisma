@@ -124,6 +124,10 @@ model MessageLog {
   content     String
   source      String   // CUSTOMER | AI | RULE | SYSTEM
   createdAt   DateTime @default(now())
+
+  // The inbox query fetches a business's most recent messages ordered by time;
+  // without this index it becomes a sequential scan as the table grows.
+  @@index([businessId, createdAt])
 }
 
 model Contact {

@@ -5,11 +5,13 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 import { AiService } from './ai.service';
 import { useDbAuthState } from '../auth/db-auth-state';
+import { businessCache, aiConfigCache } from '../cache';
 
 export type ConnectionStatus =
   | 'DISCONNECTED'
   | 'CONNECTING'
   | 'QR_READY'
+  | 'PAIRING_CODE_READY'
   | 'CONNECTED'
   | 'FAILED';
 
@@ -18,6 +20,8 @@ export interface ConnectionState {
   /** Human-readable explanation, shown to the user on failure. */
   reason?: string;
   qr?: string;
+  /** 8-char code the user types into WhatsApp ("Link with phone number"). */
+  pairingCode?: string;
 }
 
 // How many times we retry a *transient* drop (connection lost, service
@@ -138,26 +142,63 @@ export class WhatsappService {
     if (sessions.length === 0) return;
     console.log(`Auto-reconnecting ${sessions.length} WhatsApp session(s)...`);
 
-    for (const session of sessions) {
-      this.connectBusiness(session.businessId).catch((err) => {
-        console.error(`Failed to reconnect business ${session.businessId}:`, err);
-      });
+    // Reconnecting every session at once is a thundering herd: a simultaneous
+    // socket-open + history-sync storm against WhatsApp and a burst of DB
+    // writes. Reconnect in small batches with a gap between them so boot load
+    // stays flat as the number of sessions grows.
+    const batchSize = Number(process.env.RECONNECT_BATCH_SIZE) || 5;
+    const batchDelayMs = Number(process.env.RECONNECT_BATCH_DELAY_MS) || 3000;
+
+    for (let i = 0; i < sessions.length; i += batchSize) {
+      const batch = sessions.slice(i, i + batchSize);
+      for (const session of batch) {
+        this.connectBusiness(session.businessId).catch((err) => {
+          console.error(`Failed to reconnect business ${session.businessId}:`, err);
+        });
+      }
+      if (i + batchSize < sessions.length) {
+        await new Promise((resolve) => setTimeout(resolve, batchDelayMs));
+      }
     }
   }
 
-  async connectBusiness(businessId: string): Promise<ConnectionState> {
+  /**
+   * Opens a WhatsApp connection for a business.
+   *
+   * Default (no `pairingPhone`) shows a QR to scan. If `pairingPhone` is given
+   * (digits, international format) and the business isn't already registered, we
+   * request an 8-char pairing code instead — the "Link with phone number" flow,
+   * which sidesteps QR camera/rotation/stale-ref problems entirely.
+   */
+  async connectBusiness(businessId: string, pairingPhone?: string): Promise<ConnectionState> {
     // Always start from a clean slate — kill any prior socket/timer first.
     await this.destroySocket(businessId);
-    this.setState(businessId, { status: 'CONNECTING', reason: undefined, qr: undefined });
+    this.setState(businessId, {
+      status: 'CONNECTING',
+      reason: undefined,
+      qr: undefined,
+      pairingCode: undefined,
+    });
 
     const { state, saveCreds } = await useDbAuthState(businessId);
     const wasRegistered = Boolean(state.creds?.registered);
 
+    // Pairing-code mode: we request the code the moment Baileys signals the
+    // socket is ready (its first `qr` event — which only fires once the noise
+    // handshake is complete and it can actually send). Requesting any earlier
+    // throws "Connection Closed" (428). This flag fires that request once.
+    let pairingCodeRequested = false;
+
     const sock = makeWASocket({
       auth: state,
       logger: pino({ level: 'silent' }) as any,
-      // Rotate each QR every 30s; Baileys emits a fresh `qr` we forward to the client.
-      qrTimeout: 30_000,
+      // Keep each QR ref valid for 60s (Baileys' default) rather than 30s. The
+      // refs are single-use and rotate; a short life meant a user who scanned a
+      // ref a moment after it rotated hit a code WhatsApp had already retired,
+      // so the phone said "keep scanning" and pairing never started (408). A
+      // longer life — paired with the dashboard showing only the freshest ref —
+      // gives the scan a much wider window to land on a live code.
+      qrTimeout: 60_000,
     });
 
     // Record each credential write so other paths (notably the 515 restart
@@ -180,8 +221,19 @@ export class WhatsappService {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-          console.log(`New QR for business ${businessId}`);
-          this.setState(businessId, { status: 'QR_READY', qr, reason: undefined });
+          if (pairingPhone) {
+            // Pairing-code mode: the socket is now ready to send. Request the
+            // 8-char code once instead of showing the QR.
+            if (!pairingCodeRequested) {
+              pairingCodeRequested = true;
+              this.generatePairingCode(businessId, sock, pairingPhone).catch((err) =>
+                console.error(`generatePairingCode failed for ${businessId}:`, err),
+              );
+            }
+          } else {
+            console.log(`New QR for business ${businessId}`);
+            this.setState(businessId, { status: 'QR_READY', qr, reason: undefined });
+          }
         }
 
         if (connection === 'connecting') {
@@ -263,11 +315,55 @@ export class WhatsappService {
 
     this.sessions.set(businessId, sock);
 
-    // Wait for the socket to actually produce something useful (a QR to scan,
-    // or a live connection) rather than returning a blind fixed delay. This is
-    // what makes the QR appear quickly instead of "taking long".
+    // Wait for the socket to actually produce something useful (a QR, a pairing
+    // code, or a live connection) rather than returning a blind fixed delay.
+    // In pairing-code mode the code is requested from the `qr` event above.
     await this.waitForQrOrOpen(businessId);
     return this.states.get(businessId) || { status: 'CONNECTING' };
+  }
+
+  /**
+   * Requests an 8-char pairing code and stores it in state for the dashboard.
+   * Called from the `qr` event, so the socket is already past its handshake and
+   * able to send — but the link can still drop mid-request (WhatsApp throttles
+   * device-linking after repeated attempts), so we retry a few times.
+   */
+  private async generatePairingCode(
+    businessId: string,
+    sock: ReturnType<typeof makeWASocket>,
+    pairingPhone: string,
+  ) {
+    const digits = pairingPhone.replace(/\D/g, '');
+    if (digits.length < 8) {
+      this.setState(businessId, {
+        status: 'FAILED',
+        reason: 'That phone number looks too short. Include the country code, e.g. 256700123456.',
+      });
+      return;
+    }
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const code = await sock.requestPairingCode(digits);
+        const pretty = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+        console.log(`Pairing code for business ${businessId}: ${pretty}`);
+        this.setState(businessId, {
+          status: 'PAIRING_CODE_READY',
+          pairingCode: pretty,
+          qr: undefined,
+          reason: undefined,
+        });
+        return;
+      } catch (err) {
+        console.error(`requestPairingCode attempt ${attempt}/3 failed for ${businessId}:`, err);
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+
+    this.setState(businessId, {
+      status: 'FAILED',
+      reason: 'WhatsApp would not issue a pairing code right now. This usually means too many recent link attempts — wait about 15 minutes and try again, or use the QR code.',
+    });
   }
 
   /** Logs an inbound customer message and queues a (deferred) auto-reply. */
@@ -306,14 +402,18 @@ export class WhatsappService {
         return;
       }
 
-      const business = await prisma.business.findUnique({ where: { id: businessId } });
+      const business = await businessCache.getOrLoad(businessId, () =>
+        prisma.business.findUnique({ where: { id: businessId } }),
+      );
       const isAiPackage =
         business?.selectedPackage === 'AI_AUTOMATION' || business?.selectedPackage === 'FULL';
 
       // AI and keyword modes evaluate every message individually. The no-AI /
       // no-keyword case sends an identical canned reply, so collapse a burst to
       // one reply per contact (per grace window) to avoid spamming.
-      const config = await prisma.aiConfig.findUnique({ where: { businessId } });
+      const config = await aiConfigCache.getOrLoad(businessId, () =>
+        prisma.aiConfig.findUnique({ where: { businessId } }),
+      );
       const hasKeywords =
         Array.isArray(config?.rules) && (config!.rules as unknown[]).length > 0;
       const perMessage = isAiPackage || hasKeywords;
@@ -419,12 +519,19 @@ export class WhatsappService {
     }
   }
 
-  /** Polls in-memory state until a QR is ready / connection opens / it fails, or ~10s elapse. */
+  /** Polls in-memory state until something useful is ready (QR / pairing code / open / failed), or ~15s elapse. */
   private async waitForQrOrOpen(businessId: string): Promise<void> {
-    const deadline = Date.now() + 10_000;
+    const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
       const status = this.states.get(businessId)?.status;
-      if (status === 'QR_READY' || status === 'CONNECTED' || status === 'FAILED') return;
+      if (
+        status === 'QR_READY' ||
+        status === 'PAIRING_CODE_READY' ||
+        status === 'CONNECTED' ||
+        status === 'FAILED'
+      ) {
+        return;
+      }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
@@ -544,6 +651,7 @@ export class WhatsappService {
       inMemory &&
       (inMemory.status === 'CONNECTING' ||
         inMemory.status === 'QR_READY' ||
+        inMemory.status === 'PAIRING_CODE_READY' ||
         inMemory.status === 'CONNECTED' ||
         inMemory.status === 'FAILED')
     ) {
@@ -558,6 +666,15 @@ export class WhatsappService {
   async retry(businessId: string): Promise<ConnectionState> {
     this.reconnectAttempts.delete(businessId);
     return this.connectBusiness(businessId);
+  }
+
+  /**
+   * Start linking via the "Link with phone number" flow: a fresh connection
+   * that requests an 8-char pairing code for `phoneNumber` instead of a QR.
+   */
+  async startPairingCode(businessId: string, phoneNumber: string): Promise<ConnectionState> {
+    this.reconnectAttempts.delete(businessId);
+    return this.connectBusiness(businessId, phoneNumber);
   }
 
   async getStatus(businessId: string): Promise<ConnectionState> {

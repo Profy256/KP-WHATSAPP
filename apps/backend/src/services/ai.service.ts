@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { prisma } from '../prisma';
+import { aiConfigCache, platformConfigCache, PLATFORM_CONFIG_KEY } from '../cache';
 
 const OPENAI_COMPATIBLE_BASE_URLS: Record<string, string | undefined> = {
   openai: undefined,
@@ -51,7 +52,9 @@ export class AiService {
     allowAi: boolean,
     sendMessageCb: (text: string, source: string) => Promise<void>
   ) {
-    const config = await prisma.aiConfig.findFirst({ where: { businessId } });
+    const config = await aiConfigCache.getOrLoad(businessId, () =>
+      prisma.aiConfig.findUnique({ where: { businessId } }),
+    );
     if (!config) {
       console.log(`No AiConfig for business ${businessId} — nothing to auto-reply with.`);
       return;
@@ -83,9 +86,13 @@ export class AiService {
     if (allowAi) {
       // AI packages answer every message with the model.
       if (!config.prompt) return;
-      const platformConfig = await prisma.platformConfig.findFirst({
-        where: { isActive: true, isDefault: true },
-      }) ?? await prisma.platformConfig.findFirst({ where: { isActive: true } });
+      const platformConfig = await platformConfigCache.getOrLoad(
+        PLATFORM_CONFIG_KEY,
+        async () =>
+          (await prisma.platformConfig.findFirst({
+            where: { isActive: true, isDefault: true },
+          })) ?? (await prisma.platformConfig.findFirst({ where: { isActive: true } })),
+      );
 
       if (!platformConfig) {
         console.log(`No active PlatformConfig — cannot generate AI reply for business ${businessId}.`);

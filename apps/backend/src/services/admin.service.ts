@@ -1,4 +1,5 @@
 import { prisma } from '../prisma';
+import { businessCache, platformConfigCache, PLATFORM_CONFIG_KEY } from '../cache';
 
 export class AdminService {
   // ─── Overview stats ──────────────────────────────────────────────────────
@@ -164,7 +165,11 @@ export class AdminService {
   }
 
   async updateBusinessPackage(businessId: string, selectedPackage: string) {
-    return prisma.business.update({ where: { id: businessId }, data: { selectedPackage } });
+    const updated = await prisma.business.update({ where: { id: businessId }, data: { selectedPackage } });
+    // The per-message path keys AI/keyword behaviour off the package; clear the
+    // cached business so the change takes effect immediately.
+    businessCache.delete(businessId);
+    return updated;
   }
 
   // ─── Sessions ─────────────────────────────────────────────────────────────
@@ -252,19 +257,27 @@ export class AdminService {
 
   async upsertPlatformConfig(data: { id?: string; provider: string; model: string; apiKey: string; isDefault: boolean; isActive: boolean }) {
     if (data.id) {
-      return prisma.platformConfig.update({ where: { id: data.id }, data });
+      const updated = await prisma.platformConfig.update({ where: { id: data.id }, data });
+      platformConfigCache.delete(PLATFORM_CONFIG_KEY);
+      return updated;
     }
     const { id, ...createData } = data;
-    return prisma.platformConfig.create({ data: createData });
+    const created = await prisma.platformConfig.create({ data: createData });
+    platformConfigCache.delete(PLATFORM_CONFIG_KEY);
+    return created;
   }
 
   async deletePlatformConfig(id: string) {
-    return prisma.platformConfig.delete({ where: { id } });
+    const deleted = await prisma.platformConfig.delete({ where: { id } });
+    platformConfigCache.delete(PLATFORM_CONFIG_KEY);
+    return deleted;
   }
 
   async setDefaultPlatformConfig(id: string) {
     await prisma.platformConfig.updateMany({ data: { isDefault: false } });
-    return prisma.platformConfig.update({ where: { id }, data: { isDefault: true } });
+    const updated = await prisma.platformConfig.update({ where: { id }, data: { isDefault: true } });
+    platformConfigCache.delete(PLATFORM_CONFIG_KEY);
+    return updated;
   }
 
   // ─── Referrals ────────────────────────────────────────────────────────────

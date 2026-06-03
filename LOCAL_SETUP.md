@@ -71,6 +71,14 @@ pnpm install
 
 This installs dependencies for all workspace apps (`apps/backend`, `apps/frontend`, and `apps/admin`) via the pnpm workspace.
 
+> **Running scripts from the repo root.** The root has no `dev` script, so `pnpm run dev` from the root fails with `ERR_PNPM_NO_SCRIPT`. Either `cd` into an app folder first, or target an app from the root with `--filter`:
+>
+> ```bash
+> pnpm --filter backend dev    # same as: cd apps/backend && pnpm run dev
+> pnpm --filter frontend dev   # same as: cd apps/frontend && pnpm run dev
+> pnpm --filter admin dev      # same as: cd apps/admin   && pnpm run dev
+> ```
+
 ### Step 3 — Start the Database
 
 You have two options — pick whichever you prefer:
@@ -262,6 +270,7 @@ docker compose down -v      # Stop and delete the database (resets all data)
 | Command | Directory | Description |
 |---|---|---|
 | `pnpm install` | root | Install all workspace dependencies |
+| `pnpm --filter <app> dev` | root | Run an app's dev server from the root (`backend`, `frontend`, or `admin`) |
 | `pnpm run dev` | `apps/backend` | Start backend with hot reload |
 | `pnpm run build` | `apps/backend` | Compile TypeScript to `dist/` |
 | `pnpm run dev` | `apps/frontend` | Start Next.js dev server |
@@ -292,6 +301,14 @@ Run from `apps/backend`:
 
 ```bash
 npx prisma generate
+```
+
+### `ERR_PNPM_NO_SCRIPT  Missing script: dev`
+
+You ran `pnpm run dev` from the repo root, which has no `dev` script. Run it from inside an app folder (`apps/backend`, `apps/frontend`, or `apps/admin`), or from the root with a filter:
+
+```bash
+pnpm --filter backend dev
 ```
 
 ### Port 3000 or 3001 already in use

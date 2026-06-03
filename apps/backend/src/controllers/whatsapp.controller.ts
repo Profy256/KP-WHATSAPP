@@ -10,6 +10,7 @@ export class WhatsappController {
     this.getQrCode = this.getQrCode.bind(this);
     this.getStatus = this.getStatus.bind(this);
     this.retry = this.retry.bind(this);
+    this.requestPairingCode = this.requestPairingCode.bind(this);
     this.sendMessage = this.sendMessage.bind(this);
   }
 
@@ -58,6 +59,29 @@ export class WhatsappController {
       }
 
       const state = await this.whatsappService.retry(business.id);
+      res.status(200).json(state);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async requestPairingCode(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.userId;
+      const { phoneNumber } = req.body;
+
+      if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.replace(/\D/g, '').length < 8) {
+        res.status(400).json({ error: 'A valid phone number in international format is required.' });
+        return;
+      }
+
+      const business = await prisma.business.findFirst({ where: { userId } });
+      if (!business) {
+         res.status(404).json({ error: 'Business not found' });
+         return;
+      }
+
+      const state = await this.whatsappService.startPairingCode(business.id, phoneNumber);
       res.status(200).json(state);
     } catch (error) {
       next(error);
