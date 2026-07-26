@@ -65,7 +65,7 @@ export default function AdminBusinessesPage() {
                   <td style={{ padding: '12px 16px' }}>
                     {isEditing ? (
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                        <select value={editPkg.value} onChange={e => setEditPkg({ ...editPkg, value: e.target.value })}
+                        <select value={editPkg!.value} onChange={e => setEditPkg({ ...editPkg!, value: e.target.value })}
                           style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: '12px' }}>
                           {PACKAGES.map(p => <option key={p} value={p}>{p.replace('_', ' ')}</option>)}
                         </select>
