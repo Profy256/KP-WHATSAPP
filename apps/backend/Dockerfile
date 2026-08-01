@@ -38,5 +38,7 @@ COPY apps/backend/package.json ./apps/backend/package.json
 
 EXPOSE 3001
 
-# Run migrations then start — safe to run migrate deploy on every boot
-CMD ["sh", "-c", "cd apps/backend && npx prisma migrate deploy && node dist/index.js"]
+# Run migrations then start — safe to run migrate deploy on every boot.
+# Retries handle Neon's scale-to-zero: the first attempt wakes a sleeping
+# compute and may fail with P1001, so we retry until it succeeds.
+CMD ["sh", "-c", "cd apps/backend && for i in 1 2 3 4 5; do npx prisma migrate deploy && break; echo \"migrate attempt $i failed, retrying in 10s\"; sleep 10; done && node dist/index.js"]
