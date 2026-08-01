@@ -27,8 +27,10 @@ ENV NODE_ENV=production
 # Runtime binaries needed for Prisma CLI (migrations on startup)
 RUN npm install -g pnpm
 
-COPY --from=installer /app/node_modules ./node_modules
-COPY --from=installer /app/apps/backend/node_modules ./apps/backend/node_modules
+# node_modules comes from builder (not installer): builder ran `prisma generate`,
+# so it contains the generated client (node_modules/.prisma) that the app requires.
+COPY --from=builder  /app/node_modules ./node_modules
+COPY --from=builder  /app/apps/backend/node_modules ./apps/backend/node_modules
 COPY --from=builder  /app/apps/backend/dist ./apps/backend/dist
 COPY --from=builder  /app/apps/backend/prisma ./apps/backend/prisma
 # prisma.config.ts is required — Prisma 7 reads datasource url from it (not schema.prisma)
