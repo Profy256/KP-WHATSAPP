@@ -19,8 +19,10 @@ export interface DeveloperProfile {
 }
 
 // Public site URL — used to build absolute canonical / Open Graph URLs.
+// Normalize a missing scheme (e.g. "example.com") so new URL() never throws.
+const rawSiteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://kp-whatsapp.vercel.app').trim();
 export const SITE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL || 'https://kp-whatsapp.vercel.app'
+  /^https?:\/\//i.test(rawSiteUrl) ? rawSiteUrl : `https://${rawSiteUrl}`
 ).replace(/\/$/, '');
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
