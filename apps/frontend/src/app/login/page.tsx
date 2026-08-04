@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Cookies from 'js-cookie';
 import { GoogleLogin } from '@react-oauth/google';
-import api from '../../lib/api';
+import api, { warmUp, authErrorMessage } from '../../lib/api';
 
 function LoginForm() {
   const searchParams = useSearchParams();
@@ -14,6 +14,7 @@ function LoginForm() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [slow, setSlow] = useState(false);
   const [checking, setChecking] = useState(true);
   const router = useRouter();
   const referralCode = searchParams.get('ref') || '';
@@ -24,8 +25,22 @@ function LoginForm() {
       router.replace('/dashboard');
     } else {
       setChecking(false);
+      // Start the API's cold boot now, while the user is still typing, so the
+      // submit below doesn't have to wait for it.
+      warmUp();
     }
   }, [router]);
+
+  // A slow submit is almost always the API waking up. Say so rather than
+  // leaving the user staring at a spinner wondering if it's broken.
+  useEffect(() => {
+    if (!loading) {
+      setSlow(false);
+      return;
+    }
+    const t = setTimeout(() => setSlow(true), 6000);
+    return () => clearTimeout(t);
+  }, [loading]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +55,7 @@ function LoginForm() {
       Cookies.set('profy_token', data.token, { expires: 7 });
       router.replace('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Authentication failed');
+      setError(authErrorMessage(err, 'Authentication failed'));
     } finally {
       setLoading(false);
     }
@@ -48,6 +63,7 @@ function LoginForm() {
 
   const handleGoogleSuccess = async (credentialResponse: any) => {
     setError('');
+    setLoading(true);
     try {
       const { data } = await api.post('/auth/google', {
         credential: credentialResponse.credential,
@@ -55,7 +71,9 @@ function LoginForm() {
       Cookies.set('profy_token', data.token, { expires: 7 });
       router.replace('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Google sign-in failed');
+      setError(authErrorMessage(err, 'Google sign-in failed'));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -85,6 +103,13 @@ function LoginForm() {
           {error && (
             <div style={{ color: 'var(--error)', fontSize: '14px', marginBottom: '16px', textAlign: 'center', padding: '10px', background: 'rgba(239,68,68,0.1)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(239,68,68,0.2)' }}>
               {error}
+            </div>
+          )}
+
+          {slow && !error && (
+            <div style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '16px', textAlign: 'center', padding: '10px', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+              Waking up the server — this can take up to a minute on the first
+              request. Please don&apos;t close this page.
             </div>
           )}
 

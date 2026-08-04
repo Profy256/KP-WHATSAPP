@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
 import { prisma } from '../prisma';
 import { EmailService } from './email.service';
+import { AppError } from '../errors';
 
 export class AuthService {
   private jwtSecret = process.env.JWT_SECRET || 'fallback_secret';
@@ -12,7 +13,7 @@ export class AuthService {
   async signup(email: string, password: string, name?: string, businessName: string = 'My Business', referralCode?: string) {
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
-      throw new Error('Email already in use');
+      throw new AppError('Email already in use', 409);
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -53,14 +54,14 @@ export class AuthService {
       include: { businesses: true },
     });
 
-    if (!user) throw new Error('Invalid credentials');
+    if (!user) throw new AppError('Invalid credentials', 401);
 
     if (!user.password) {
-      throw new Error('This account uses Google sign-in. Please use the Google button.');
+      throw new AppError('This account uses Google sign-in. Please use the Google button.', 401);
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) throw new Error('Invalid credentials');
+    if (!isPasswordValid) throw new AppError('Invalid credentials', 401);
 
     const token = this.generateToken(user.id);
     const { password: _, ...userWithoutPassword } = user;
@@ -75,7 +76,7 @@ export class AuthService {
 
     const payload = ticket.getPayload();
     if (!payload || !payload.email) {
-      throw new Error('Invalid Google token');
+      throw new AppError('Invalid Google token', 401);
     }
 
     const { email, name, sub: googleId } = payload;
