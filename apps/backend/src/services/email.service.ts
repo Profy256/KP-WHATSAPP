@@ -1,20 +1,34 @@
 import { Resend } from 'resend';
 
 export class EmailService {
-  private resend: Resend;
+  private resend: Resend | null = null;
   private from: string;
 
   constructor() {
-    this.resend = new Resend(process.env.RESEND_API_KEY);
     this.from = process.env.RESEND_FROM || 'KP WhatsApp Automation <noreply@yourdomain.com>';
   }
 
+  /**
+   * Built on first use, not in the constructor.
+   *
+   * `new Resend(undefined)` throws, and this service is constructed at module
+   * load (AuthController -> AuthService -> EmailService). Doing it eagerly meant
+   * an unset RESEND_API_KEY crashed the entire server on boot — every route
+   * down, including signup — over an optional welcome email.
+   */
+  private client(): Resend | null {
+    if (!process.env.RESEND_API_KEY) return null;
+    if (!this.resend) this.resend = new Resend(process.env.RESEND_API_KEY);
+    return this.resend;
+  }
+
   async sendWelcomeEmail(to: string, name?: string) {
-    if (!process.env.RESEND_API_KEY) return;
+    const resend = this.client();
+    if (!resend) return;
 
     const displayName = name || to.split('@')[0];
 
-    await this.resend.emails.send({
+    await resend.emails.send({
       from: this.from,
       to,
       subject: 'Welcome to KP WhatsApp Automation',
