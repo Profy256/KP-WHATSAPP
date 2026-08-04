@@ -2,7 +2,9 @@
 #   docker build -f apps/backend/Dockerfile .
 
 FROM node:20-alpine AS base
-RUN npm install -g pnpm
+# Pinned: an unpinned `pnpm` resolves to whatever is latest at build time, and a
+# pnpm major that rewrites the lockfile format fails `--frozen-lockfile` below.
+RUN npm install -g pnpm@11.20.0
 
 # ── Install deps ──────────────────────────────────────────────────────────────
 FROM base AS installer
@@ -25,7 +27,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Runtime binaries needed for Prisma CLI (migrations on startup)
-RUN npm install -g pnpm
+RUN npm install -g pnpm@11.20.0
 
 # node_modules comes from builder (not installer): builder ran `prisma generate`,
 # so it contains the generated client (node_modules/.prisma) that the app requires.

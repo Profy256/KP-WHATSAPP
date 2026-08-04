@@ -17,7 +17,7 @@
     "@hapi/boom": "^10.0.1",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
-    "@whiskeysockets/baileys": "^7.0.0-rc13",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",

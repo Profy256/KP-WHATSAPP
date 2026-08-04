@@ -1,4 +1,4 @@
-import makeWASocket, { DisconnectReason } from '@whiskeysockets/baileys';
+import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import { Boom } from '@hapi/boom';
 import { Prisma } from '@prisma/client';
@@ -31,6 +31,44 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 // Grace period after a customer message before the bot replies. If the owner
 // reads or answers the chat within this window, the auto-reply is cancelled.
 const AUTO_REPLY_DELAY_MS = 20_000;
+
+// WhatsApp closes the socket with 405 when it doesn't like the connection —
+// most often because the client announced a WhatsApp Web version it has since
+// retired. Baileys has no enum member for it.
+const CONNECTION_FAILURE = 405;
+
+// Each Baileys release bakes in the WhatsApp Web version that was current when
+// it was published. WhatsApp retires old versions, and once ours is retired it
+// refuses the socket with 405 *before ever issuing a QR* — the user sees the
+// code "expire" without it ever appearing. Fetching the live version at connect
+// time keeps us working when WhatsApp bumps it, without waiting for a Baileys
+// release. Cached for an hour so we don't hit the network on every reconnect.
+const WA_VERSION_TTL_MS = 60 * 60 * 1000;
+let cachedWaVersion: { version: [number, number, number]; fetchedAt: number } | null = null;
+
+async function resolveWaVersion(): Promise<[number, number, number] | undefined> {
+  if (cachedWaVersion && Date.now() - cachedWaVersion.fetchedAt < WA_VERSION_TTL_MS) {
+    return cachedWaVersion.version;
+  }
+  try {
+    // Bounded: this sits in the path of every connect, so a slow or unreachable
+    // version endpoint must not stall linking. Falling back to the bundled
+    // version is far better than hanging.
+    const { version } = await fetchLatestBaileysVersion({ signal: AbortSignal.timeout(5000) });
+    cachedWaVersion = { version: version as [number, number, number], fetchedAt: Date.now() };
+    console.log(`Using WhatsApp Web version ${version.join('.')}`);
+  } catch (err) {
+    // Network blip or GitHub hiccup — a stale cached version still beats the
+    // (older) one bundled with the installed Baileys release.
+    console.error('Could not fetch the latest WhatsApp Web version:', err);
+  }
+  return cachedWaVersion?.version;
+}
+
+/** Forces the next connect to re-fetch the version (used after a 405). */
+function invalidateWaVersion() {
+  cachedWaVersion = null;
+}
 
 export class WhatsappService {
   private sessions: Map<string, ReturnType<typeof makeWASocket>> = new Map();
@@ -189,7 +227,14 @@ export class WhatsappService {
     // throws "Connection Closed" (428). This flag fires that request once.
     let pairingCodeRequested = false;
 
+    // Whether WhatsApp actually handed us a QR during this attempt. Without
+    // this, every early close (a refused connection, a dropped handshake) was
+    // reported to the user as "the QR code expired before it was scanned" —
+    // even when no QR had ever been displayed.
+    let qrShown = false;
+
     const sock = makeWASocket({
+      version: await resolveWaVersion(),
       auth: state,
       logger: pino({ level: 'silent' }) as any,
       // Keep each QR ref valid for 60s (Baileys' default) rather than 30s. The
@@ -232,6 +277,7 @@ export class WhatsappService {
             }
           } else {
             console.log(`New QR for business ${businessId}`);
+            qrShown = true;
             this.setState(businessId, { status: 'QR_READY', qr, reason: undefined });
           }
         }
@@ -258,7 +304,7 @@ export class WhatsappService {
             data: { status: 'DISCONNECTED' },
           });
 
-          await this.handleClose(businessId, statusCode, wasRegistered);
+          await this.handleClose(businessId, statusCode, wasRegistered, qrShown);
         }
       } catch (err) {
         console.error(`connection.update handler failed for business ${businessId}:`, err);
@@ -541,6 +587,7 @@ export class WhatsappService {
     businessId: string,
     statusCode: number | undefined,
     wasRegistered: boolean,
+    qrShown: boolean,
   ) {
     await this.destroySocket(businessId);
 
@@ -593,14 +640,52 @@ export class WhatsappService {
         });
         return;
 
+      case CONNECTION_FAILURE: {
+        // WhatsApp refused the socket outright. The usual cause is that the
+        // WhatsApp Web version we announced has been retired — so drop the
+        // cached version and try once more with a freshly fetched one before
+        // giving up. This close arrives before any QR, so reporting it as an
+        // expired QR (as we used to) sent users chasing the wrong problem.
+        invalidateWaVersion();
+        const attempts = (this.reconnectAttempts.get(businessId) || 0) + 1;
+        if (attempts <= 1) {
+          this.reconnectAttempts.set(businessId, attempts);
+          console.log(`Business ${businessId} refused with 405; retrying with a refreshed WhatsApp version`);
+          this.setState(businessId, {
+            status: 'CONNECTING',
+            qr: undefined,
+            reason: 'WhatsApp refused the connection. Retrying…',
+          });
+          const timer = setTimeout(() => {
+            this.reconnectTimers.delete(businessId);
+            this.connectBusiness(businessId).catch((err) =>
+              console.error(`405 retry failed for ${businessId}:`, err),
+            );
+          }, 2000);
+          this.reconnectTimers.set(businessId, timer);
+          return;
+        }
+        this.reconnectAttempts.delete(businessId);
+        this.setState(businessId, {
+          status: 'FAILED',
+          qr: undefined,
+          reason: 'WhatsApp refused the connection (error 405). This usually clears on its own — wait a few minutes and click retry. If it keeps happening the server needs a WhatsApp library update.',
+        });
+        return;
+      }
+
       default: {
         // Transient drop (timed out, connection lost/closed, service unavailable).
         if (!wasRegistered) {
-          // We were still in the QR phase and nobody scanned in time.
+          // Still in the linking phase. Only call it an expired QR if a QR was
+          // genuinely shown — otherwise the connection died before WhatsApp
+          // ever issued one, which is a different problem entirely.
           this.setState(businessId, {
             status: 'FAILED',
             qr: undefined,
-            reason: 'The QR code expired before it was scanned. Click retry to generate a new one.',
+            reason: qrShown
+              ? 'The QR code expired before it was scanned. Click retry to generate a new one.'
+              : `Could not reach WhatsApp to generate a QR code. ${this.describeDisconnect(statusCode)} Click retry to try again.`,
           });
           return;
         }
