@@ -15,6 +15,9 @@ export type ConnectionStatus =
   | 'CONNECTED'
   | 'FAILED';
 
+/** How the user is linking: type a code into WhatsApp, or scan a QR. */
+export type LinkMethod = 'phone' | 'qr';
+
 export interface ConnectionState {
   status: ConnectionStatus;
   /** Human-readable explanation, shown to the user on failure. */
@@ -22,6 +25,8 @@ export interface ConnectionState {
   qr?: string;
   /** 8-char code the user types into WhatsApp ("Link with phone number"). */
   pairingCode?: string;
+  /** Which flow this attempt is running, so the dashboard shows the right panel. */
+  method?: LinkMethod;
 }
 
 // How many times we retry a *transient* drop (connection lost, service
@@ -75,6 +80,11 @@ export class WhatsappService {
   private states: Map<string, ConnectionState> = new Map();
   private reconnectAttempts: Map<string, number> = new Map();
   private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
+  // The phone number a business is currently linking with, remembered for the
+  // whole linking attempt. Retries and transient reconnects carry no number of
+  // their own, so without this every retry silently dropped back to QR mode.
+  // Cleared once the account is linked, or when the user picks QR explicitly.
+  private pairingPhones: Map<string, string> = new Map();
   // Tracks the most recent in-flight credential write per business so the
   // post-scan restart can flush it before reloading creds from the DB.
   private credsSaves: Map<string, Promise<void>> = new Map();
@@ -153,13 +163,13 @@ export class WhatsappService {
   private describeDisconnect(statusCode: number | undefined): string {
     switch (statusCode) {
       case DisconnectReason.loggedOut:
-        return 'You logged out from your phone. Scan the QR code again to reconnect.';
+        return 'You logged out from your phone. Link your account again to reconnect.';
       case DisconnectReason.badSession:
-        return 'The saved session is no longer valid. Please scan the QR code again.';
+        return 'The saved session is no longer valid. Please link your account again.';
       case DisconnectReason.connectionReplaced:
         return 'This account was opened on another device or browser tab. Close the other session, then reconnect here.';
       case DisconnectReason.multideviceMismatch:
-        return 'Multi-device version mismatch. Update WhatsApp on your phone, then scan again.';
+        return 'Multi-device version mismatch. Update WhatsApp on your phone, then link again.';
       case DisconnectReason.forbidden:
         return 'WhatsApp refused this connection. The number may be banned or restricted.';
       case DisconnectReason.timedOut:
@@ -203,10 +213,11 @@ export class WhatsappService {
   /**
    * Opens a WhatsApp connection for a business.
    *
-   * Default (no `pairingPhone`) shows a QR to scan. If `pairingPhone` is given
-   * (digits, international format) and the business isn't already registered, we
-   * request an 8-char pairing code instead — the "Link with phone number" flow,
-   * which sidesteps QR camera/rotation/stale-ref problems entirely.
+   * Pairing-code mode (a `pairingPhone`, or a number remembered from earlier in
+   * this linking attempt) requests an 8-char code the user types into WhatsApp
+   * — the "Link with phone number" flow, and the primary path, since it
+   * sidesteps QR camera/rotation/stale-ref problems entirely. With no number to
+   * work from we fall back to showing a QR.
    */
   async connectBusiness(businessId: string, pairingPhone?: string): Promise<ConnectionState> {
     // Always start from a clean slate — kill any prior socket/timer first.
@@ -221,29 +232,42 @@ export class WhatsappService {
     const { state, saveCreds } = await useDbAuthState(businessId);
     const wasRegistered = Boolean(state.creds?.registered);
 
+    // Stick to the method the user chose. Retries and transient reconnects call
+    // us with no number, so fall back to the one they linked with — dropping
+    // back to QR there is what made "use phone number instead" unrecoverable
+    // once anything went wrong. An already-registered session needs neither.
+    const phone = wasRegistered ? undefined : pairingPhone ?? this.pairingPhones.get(businessId);
+    if (phone) this.pairingPhones.set(businessId, phone);
+    this.setState(businessId, { method: phone ? 'phone' : 'qr' });
+
     // Pairing-code mode: we request the code the moment Baileys signals the
     // socket is ready (its first `qr` event — which only fires once the noise
     // handshake is complete and it can actually send). Requesting any earlier
     // throws "Connection Closed" (428). This flag fires that request once.
     let pairingCodeRequested = false;
 
-    // Whether WhatsApp actually handed us a QR during this attempt. Without
-    // this, every early close (a refused connection, a dropped handshake) was
-    // reported to the user as "the QR code expired before it was scanned" —
-    // even when no QR had ever been displayed.
-    let qrShown = false;
+    // Whether WhatsApp actually handed us something to show — a QR, or a
+    // pairing code. Without this, every early close (a refused connection, a
+    // dropped handshake) was reported to the user as "the code expired before
+    // it was used", even when no code had ever been displayed.
+    let codeShown = false;
 
     const sock = makeWASocket({
       version: await resolveWaVersion(),
       auth: state,
       logger: pino({ level: 'silent' }) as any,
-      // Keep each QR ref valid for 60s (Baileys' default) rather than 30s. The
-      // refs are single-use and rotate; a short life meant a user who scanned a
-      // ref a moment after it rotated hit a code WhatsApp had already retired,
-      // so the phone said "keep scanning" and pairing never started (408). A
-      // longer life — paired with the dashboard showing only the freshest ref —
-      // gives the scan a much wider window to land on a live code.
-      qrTimeout: 60_000,
+      // Baileys ends the socket once it runs out of QR refs, so this timeout
+      // bounds the whole linking window, not just one code.
+      //
+      // QR (60s per ref, up from Baileys' 30s default): the refs are single-use
+      // and rotate, and a short life meant a user who scanned a ref a moment
+      // after it rotated hit a code WhatsApp had already retired — the phone
+      // said "keep scanning" and pairing never started (408).
+      //
+      // Pairing code (180s): the user has to switch apps, dig through Linked
+      // Devices and type 8 characters. At 60s the socket was routinely torn
+      // down mid-entry, which read to them as the code "collapsing".
+      qrTimeout: phone ? 180_000 : 60_000,
     });
 
     // Record each credential write so other paths (notably the 515 restart
@@ -266,31 +290,43 @@ export class WhatsappService {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-          if (pairingPhone) {
+          if (phone) {
             // Pairing-code mode: the socket is now ready to send. Request the
             // 8-char code once instead of showing the QR.
             if (!pairingCodeRequested) {
               pairingCodeRequested = true;
-              this.generatePairingCode(businessId, sock, pairingPhone).catch((err) =>
-                console.error(`generatePairingCode failed for ${businessId}:`, err),
-              );
+              this.generatePairingCode(businessId, sock, phone)
+                .then((issued) => {
+                  if (issued) codeShown = true;
+                })
+                .catch((err) =>
+                  console.error(`generatePairingCode failed for ${businessId}:`, err),
+                );
             }
           } else {
             console.log(`New QR for business ${businessId}`);
-            qrShown = true;
+            codeShown = true;
             this.setState(businessId, { status: 'QR_READY', qr, reason: undefined });
           }
         }
 
         if (connection === 'connecting') {
-          // Don't clobber a QR we're already showing.
-          if (this.states.get(businessId)?.status !== 'QR_READY') {
+          // Don't clobber a code we're already showing.
+          const shown = this.states.get(businessId)?.status;
+          if (shown !== 'QR_READY' && shown !== 'PAIRING_CODE_READY') {
             this.setState(businessId, { status: 'CONNECTING' });
           }
         } else if (connection === 'open') {
           console.log(`Connection opened for business ${businessId}`);
           this.reconnectAttempts.delete(businessId);
-          this.setState(businessId, { status: 'CONNECTED', qr: undefined, reason: undefined });
+          // Linked — later reconnects use the saved credentials, not a code.
+          this.pairingPhones.delete(businessId);
+          this.setState(businessId, {
+            status: 'CONNECTED',
+            qr: undefined,
+            pairingCode: undefined,
+            reason: undefined,
+          });
           await prisma.session.updateMany({
             where: { businessId },
             data: { status: 'CONNECTED' },
@@ -304,7 +340,7 @@ export class WhatsappService {
             data: { status: 'DISCONNECTED' },
           });
 
-          await this.handleClose(businessId, statusCode, wasRegistered, qrShown);
+          await this.handleClose(businessId, statusCode, wasRegistered, codeShown, Boolean(phone));
         }
       } catch (err) {
         console.error(`connection.update handler failed for business ${businessId}:`, err);
@@ -373,19 +409,22 @@ export class WhatsappService {
    * Called from the `qr` event, so the socket is already past its handshake and
    * able to send — but the link can still drop mid-request (WhatsApp throttles
    * device-linking after repeated attempts), so we retry a few times.
+   *
+   * Resolves true if a code reached the user, so the caller can tell a code
+   * that expired unused from one that was never issued at all.
    */
   private async generatePairingCode(
     businessId: string,
     sock: ReturnType<typeof makeWASocket>,
     pairingPhone: string,
-  ) {
+  ): Promise<boolean> {
     const digits = pairingPhone.replace(/\D/g, '');
     if (digits.length < 8) {
       this.setState(businessId, {
         status: 'FAILED',
         reason: 'That phone number looks too short. Include the country code, e.g. 256700123456.',
       });
-      return;
+      return false;
     }
 
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -399,7 +438,7 @@ export class WhatsappService {
           qr: undefined,
           reason: undefined,
         });
-        return;
+        return true;
       } catch (err) {
         console.error(`requestPairingCode attempt ${attempt}/3 failed for ${businessId}:`, err);
         if (attempt < 3) await new Promise((r) => setTimeout(r, 1500));
@@ -408,8 +447,9 @@ export class WhatsappService {
 
     this.setState(businessId, {
       status: 'FAILED',
-      reason: 'WhatsApp would not issue a pairing code right now. This usually means too many recent link attempts — wait about 15 minutes and try again, or use the QR code.',
+      reason: 'WhatsApp would not issue a pairing code right now. This usually means too many recent link attempts — wait about 15 minutes and try again, or use the QR code instead.',
     });
+    return false;
   }
 
   /** Logs an inbound customer message and queues a (deferred) auto-reply. */
@@ -587,11 +627,12 @@ export class WhatsappService {
     businessId: string,
     statusCode: number | undefined,
     wasRegistered: boolean,
-    qrShown: boolean,
+    codeShown: boolean,
+    usedPhone: boolean,
   ) {
     await this.destroySocket(businessId);
 
-    // The credentials are no longer usable — wipe them so the user gets a fresh QR.
+    // The credentials are no longer usable — wipe them so the user can re-link.
     const wipeCreds = async () => {
       await prisma.session.updateMany({
         where: { businessId },
@@ -677,15 +718,20 @@ export class WhatsappService {
       default: {
         // Transient drop (timed out, connection lost/closed, service unavailable).
         if (!wasRegistered) {
-          // Still in the linking phase. Only call it an expired QR if a QR was
+          // Still in the linking phase. Only call it an expired code if one was
           // genuinely shown — otherwise the connection died before WhatsApp
           // ever issued one, which is a different problem entirely.
+          const noun = usedPhone ? 'pairing code' : 'QR code';
+          const expired = usedPhone
+            ? 'The pairing code expired before it was entered on your phone. Click retry to get a new one.'
+            : 'The QR code expired before it was scanned. Click retry to generate a new one.';
           this.setState(businessId, {
             status: 'FAILED',
             qr: undefined,
-            reason: qrShown
-              ? 'The QR code expired before it was scanned. Click retry to generate a new one.'
-              : `Could not reach WhatsApp to generate a QR code. ${this.describeDisconnect(statusCode)} Click retry to try again.`,
+            pairingCode: undefined,
+            reason: codeShown
+              ? expired
+              : `Could not reach WhatsApp to generate a ${noun}. ${this.describeDisconnect(statusCode)} Click retry to try again.`,
           });
           return;
         }
@@ -722,32 +768,34 @@ export class WhatsappService {
   }
 
   /**
-   * Returns the current connection state, kicking off a connection attempt if
-   * one isn't already running and the business isn't connected.
+   * Returns the current connection state. This is the dashboard's poll target,
+   * so it must never start a *linking* attempt on its own: doing so meant
+   * simply opening the page burned QR sockets in the background, and one of
+   * them failing yanked the user out of the phone-number form they were
+   * filling in. Linking is now started explicitly — startPairingCode / startQr.
+   *
+   * A business that already has saved credentials is a different case: there's
+   * nothing for the user to choose, so resume it.
    */
   async getConnectionState(businessId: string): Promise<ConnectionState> {
-    const inMemory = this.states.get(businessId);
-
-    // An attempt is already underway or live (connecting, showing a QR, or open),
-    // or a terminal failure is being shown — report it as-is. Never spawn a second
-    // socket on top of one of these, and never auto-restart a FAILED state (the
+    // An attempt is underway, live, or failed — report it as-is. Never spawn a
+    // second socket on top of one, and never auto-restart a FAILED state (the
     // user must hit retry so they actually see the reason).
-    if (
-      inMemory &&
-      (inMemory.status === 'CONNECTING' ||
-        inMemory.status === 'QR_READY' ||
-        inMemory.status === 'PAIRING_CODE_READY' ||
-        inMemory.status === 'CONNECTED' ||
-        inMemory.status === 'FAILED')
-    ) {
-      return inMemory;
-    }
+    const inMemory = this.states.get(businessId);
+    if (inMemory) return inMemory;
 
-    // Nothing running — start a fresh attempt and hand back the result.
-    return this.connectBusiness(businessId);
+    const session = await prisma.session.findUnique({ where: { businessId } });
+    if (session?.creds) return this.connectBusiness(businessId);
+
+    // Never linked and nothing running — the user picks a method.
+    return { status: 'DISCONNECTED' };
   }
 
-  /** Force a brand-new connection attempt (used by the "Retry" button). */
+  /**
+   * Force a brand-new connection attempt (the "Retry" button). Stays in
+   * whichever mode the user was in — connectBusiness reuses the remembered
+   * pairing number, so a phone-number retry never silently becomes a QR.
+   */
   async retry(businessId: string): Promise<ConnectionState> {
     this.reconnectAttempts.delete(businessId);
     return this.connectBusiness(businessId);
@@ -760,6 +808,13 @@ export class WhatsappService {
   async startPairingCode(businessId: string, phoneNumber: string): Promise<ConnectionState> {
     this.reconnectAttempts.delete(businessId);
     return this.connectBusiness(businessId, phoneNumber);
+  }
+
+  /** Start linking by QR — the fallback for users who'd rather scan. */
+  async startQr(businessId: string): Promise<ConnectionState> {
+    this.reconnectAttempts.delete(businessId);
+    this.pairingPhones.delete(businessId);
+    return this.connectBusiness(businessId);
   }
 
   async getStatus(businessId: string): Promise<ConnectionState> {

@@ -7,7 +7,7 @@ import Cookies from 'js-cookie';
 import api from '../../lib/api';
 
 type ConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'QR_READY' | 'PAIRING_CODE_READY' | 'CONNECTED' | 'FAILED';
-type LinkMethod = 'qr' | 'phone';
+type LinkMethod = 'phone' | 'qr';
 
 // Country dial codes for the "Link with phone number" picker. ISO code drives
 // the flag emoji; `dial` is prepended to the national number the user types.
@@ -50,39 +50,56 @@ interface ConnectionState {
   reason?: string;
   qr?: string | null;
   pairingCode?: string | null;
+  method?: LinkMethod;
 }
 
 export default function Dashboard() {
-  const [state, setState] = useState<ConnectionState>({ status: 'CONNECTING' });
+  const [state, setState] = useState<ConnectionState>({ status: 'DISCONNECTED' });
   const [loading, setLoading] = useState(true);
-  const [retrying, setRetrying] = useState(false);
   // Surface a server-unreachable problem to the user instead of swallowing it.
   const [connError, setConnError] = useState(false);
   // Avoid overlapping requests when a poll is still in flight.
   const inFlight = useRef(false);
   // Remember that we showed a QR, so that a later QR-less CONNECTING means the
   // phone scanned and we're linking — not that we're still generating a code.
-  const sawQr = useRef(false);
-  // Which linking method the user is using: scan a QR, or type a pairing code.
-  const [method, setMethod] = useState<LinkMethod>('qr');
+  const [sawQr, setSawQr] = useState(false);
+  // Same idea for pairing: once the code has been shown, a code-less CONNECTING
+  // means the user typed it and WhatsApp is linking — not that we're back at
+  // the start. Without this the number form reappeared mid-link.
+  // Both are state, not refs: they pick which panel renders.
+  const [sawPairingCode, setSawPairingCode] = useState(false);
+  // How the user is linking. Phone-number pairing is the default: most users
+  // are on a phone, where there's no second screen to scan from, and the code
+  // doesn't rotate out from under them the way a QR does.
+  const [method, setMethod] = useState<LinkMethod>('phone');
   const [dialCode, setDialCode] = useState('256'); // default Uganda
   const [phoneInput, setPhoneInput] = useState('');
   const [requestingCode, setRequestingCode] = useState(false);
+  const [startingQr, setStartingQr] = useState(false);
 
   // Full international number: country dial code + national number, digits only,
   // with any local trunk "0" prefix dropped (e.g. UG 0700… -> 256700…).
   const fullNumber = `${dialCode}${phoneInput.replace(/\D/g, '').replace(/^0+/, '')}`;
 
   const apply = (data: ConnectionState) => {
-    if (data.status === 'QR_READY' && data.qr) sawQr.current = true;
-    if (data.status === 'CONNECTED' || data.status === 'FAILED') sawQr.current = false;
-    // If the server is handing back a pairing code, make sure we're on that tab.
-    if (data.status === 'PAIRING_CODE_READY') setMethod('phone');
+    if (data.status === 'QR_READY' && data.qr) setSawQr(true);
+    if (data.status === 'PAIRING_CODE_READY' && data.pairingCode) setSawPairingCode(true);
+    if (data.status === 'CONNECTED' || data.status === 'FAILED') {
+      setSawQr(false);
+      setSawPairingCode(false);
+    }
+    // Follow the server once it's actually showing something, so the visible tab
+    // always matches the attempt that's running. Only these two states are
+    // definitive — syncing on CONNECTING would fight the user mid-switch.
+    if (data.method && (data.status === 'QR_READY' || data.status === 'PAIRING_CODE_READY')) {
+      setMethod(data.method);
+    }
     setState({
       status: data.status,
       reason: data.reason,
       qr: data.qr ?? null,
       pairingCode: data.pairingCode ?? null,
+      method: data.method,
     });
     setConnError(false);
     setLoading(false);
@@ -94,7 +111,6 @@ export default function Dashboard() {
     if (!Cookies.get('profy_token')) return;
     if (fullNumber.length < 8) return;
     setRequestingCode(true);
-    setLoading(true);
     try {
       const res = await api.post('/whatsapp/pairing-code', { phoneNumber: fullNumber });
       apply(res.data);
@@ -103,8 +119,33 @@ export default function Dashboard() {
       setConnError(true);
     } finally {
       setRequestingCode(false);
-      setLoading(false);
     }
+  };
+
+  // The QR flow only starts when it's asked for — polling no longer spawns one.
+  const startQr = async () => {
+    if (!Cookies.get('profy_token')) return;
+    setStartingQr(true);
+    setSawQr(false);
+    setSawPairingCode(false);
+    try {
+      const res = await api.post('/whatsapp/qr');
+      apply(res.data);
+    } catch (e) {
+      console.warn('QR request failed; will keep polling.', e);
+      setConnError(true);
+    } finally {
+      setStartingQr(false);
+    }
+  };
+
+  // Switching tabs switches the live attempt too, so the panel on screen is
+  // always backed by a socket in the same mode. Picking QR kicks one off;
+  // picking phone leaves the form until they submit a number.
+  const chooseMethod = (id: LinkMethod) => {
+    if (id === method) return;
+    setMethod(id);
+    if (id === 'qr') startQr();
   };
 
   // Single source of truth: /qr returns the full connection state (status,
@@ -125,27 +166,11 @@ export default function Dashboard() {
       // drop any QR we were showing — once the server restarts it issues a fresh
       // code, and scanning the old (now-dead) one is exactly what fails silently.
       setConnError(true);
-      sawQr.current = false;
+      setSawQr(false);
       setState((prev) => ({ ...prev, qr: null }));
       setLoading(false);
     } finally {
       inFlight.current = false;
-    }
-  };
-
-  const retry = async () => {
-    if (!Cookies.get('profy_token')) return;
-    setRetrying(true);
-    setLoading(true);
-    sawQr.current = false;
-    try {
-      const res = await api.post('/whatsapp/retry');
-      apply(res.data);
-    } catch (e) {
-      console.warn('WhatsApp retry failed; will keep polling.', e);
-      setConnError(true);
-    } finally {
-      setRetrying(false);
     }
   };
 
@@ -161,9 +186,9 @@ export default function Dashboard() {
   const { status, reason, qr, pairingCode } = state;
   const isConnected = status === 'CONNECTED';
   const isFailed = status === 'FAILED';
-  // Caption for the in-progress (non-QR) states, so the user is never left
+  // Caption for the in-progress (no-QR-yet) states, so the user is never left
   // guessing. After a scan the backend reconnects with no QR — say so.
-  const progressCaption = reason || (sawQr.current
+  const progressCaption = (!isFailed && reason) || (sawQr
     ? 'QR scanned — linking your account…'
     : 'Generating QR code…');
 
@@ -197,47 +222,40 @@ export default function Dashboard() {
               Your WhatsApp account is securely connected. KP WhatsApp Automation is ready to handle your incoming messages based on your AI settings.
             </p>
           </>
-        ) : isFailed ? (
-          <>
-            <div style={{ background: 'rgba(239, 68, 68, 0.1)', padding: '24px', borderRadius: '50%', marginBottom: '24px' }}>
-              <AlertTriangle size={64} color="var(--danger, #ef4444)" />
-            </div>
-            <h2 style={{ fontSize: '24px', fontWeight: '600', marginBottom: '8px' }}>Connection Failed</h2>
-            <p style={{ color: 'var(--text-secondary)', maxWidth: '420px', marginBottom: '24px' }}>
-              {reason || 'Something went wrong while connecting to WhatsApp.'}
-            </p>
-            <button
-              onClick={retry}
-              disabled={retrying}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: '8px',
-                background: 'var(--accent-primary)', color: '#fff', fontWeight: 600,
-                padding: '12px 24px', borderRadius: 'var(--radius-md)',
-                opacity: retrying ? 0.7 : 1, cursor: retrying ? 'default' : 'pointer',
-              }}
-            >
-              <RefreshCw size={18} className={retrying ? 'animate-spin' : ''} style={retrying ? { animation: 'spin 1s linear infinite' } : undefined} />
-              {retrying ? 'Reconnecting...' : 'Try Again'}
-            </button>
-          </>
         ) : (
           <>
             <div style={{ marginBottom: '24px' }}>
               <h2 style={{ fontSize: '20px', fontWeight: '600', marginBottom: '8px' }}>Connect Your WhatsApp</h2>
               <p style={{ color: 'var(--text-secondary)', maxWidth: '420px' }}>
-                Choose how you&apos;d like to link your account. If scanning won&apos;t work, use the phone-number code instead.
+                Enter your WhatsApp number and we&apos;ll give you a code to type into the app. Prefer to scan? Switch to the QR code.
               </p>
             </div>
+
+            {/* A failed attempt is reported inline, never as a takeover screen —
+                the method toggle has to stay reachable so the user can switch
+                to (or retry) the other flow instead of being stuck. */}
+            {isFailed && (
+              <div style={{
+                display: 'flex', alignItems: 'flex-start', gap: '10px', textAlign: 'left',
+                background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--danger, #ef4444)',
+                color: 'var(--danger, #ef4444)', padding: '12px 16px',
+                borderRadius: 'var(--radius-md)', marginBottom: '20px', fontSize: '14px',
+                maxWidth: '460px',
+              }}>
+                <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+                <span>{reason || 'Something went wrong while connecting to WhatsApp.'}</span>
+              </div>
+            )}
 
             {/* Method toggle */}
             <div style={{ display: 'inline-flex', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', padding: '4px', marginBottom: '28px', gap: '4px' }}>
               {([
+                { id: 'phone' as const, label: 'Use phone number', Icon: KeyRound },
                 { id: 'qr' as const, label: 'Scan QR code', Icon: QrCode },
-                { id: 'phone' as const, label: 'Link with phone number', Icon: KeyRound },
               ]).map(({ id, label, Icon }) => (
                 <button
                   key={id}
-                  onClick={() => setMethod(id)}
+                  onClick={() => chooseMethod(id)}
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: '8px',
                     padding: '8px 16px', borderRadius: 'var(--radius-sm)', fontSize: '14px', fontWeight: 600,
@@ -264,7 +282,7 @@ export default function Dashboard() {
                         Reconnecting to server… a fresh code will appear shortly.
                       </span>
                     </div>
-                  ) : loading || (status === 'CONNECTING' && !qr) ? (
+                  ) : startingQr || loading || (status === 'CONNECTING' && !qr) ? (
                     <div style={{ width: '256px', height: '256px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
                       <Loader2 size={48} color="var(--bg-primary)" style={{ animation: 'spin 1.2s linear infinite' }} />
                       <span style={{ color: 'var(--bg-primary)', fontSize: '14px' }}>
@@ -276,8 +294,10 @@ export default function Dashboard() {
                   ) : (
                     <div style={{ width: '256px', height: '256px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
                       <Smartphone size={48} color="var(--text-muted)" />
-                      <span style={{ color: 'var(--text-muted)' }}>QR Code Unavailable</span>
-                      <button onClick={retry} style={{ color: 'var(--accent-primary)', fontWeight: '500' }}>Retry</button>
+                      <span style={{ color: 'var(--text-muted)' }}>No QR code right now</span>
+                      <button onClick={startQr} style={{ color: 'var(--accent-primary)', fontWeight: '500' }}>
+                        Generate one
+                      </button>
                     </div>
                   )}
                 </div>
@@ -307,6 +327,15 @@ export default function Dashboard() {
                 <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '16px' }}>
                   Waiting for you to enter the code… this updates automatically once linked.
                 </p>
+              </div>
+            ) : sawPairingCode && !isFailed ? (
+              /* Code was entered — WhatsApp is linking. Don't drop the user back
+                 to an empty form while that happens. */
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', padding: '24px 0' }}>
+                <Loader2 size={48} color="var(--accent-primary)" style={{ animation: 'spin 1.2s linear infinite' }} />
+                <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+                  Code accepted — linking your account…
+                </span>
               </div>
             ) : (
               /* Phone-number entry form. */
@@ -362,7 +391,9 @@ export default function Dashboard() {
                 >
                   {requestingCode
                     ? <><Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} /> Generating code…</>
-                    : <>Get pairing code</>}
+                    : isFailed
+                      ? <><RefreshCw size={18} /> Try again</>
+                      : <>Get pairing code</>}
                 </button>
                 <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '12px', textAlign: 'left' }}>
                   Pick your country, then type your number without the leading 0.

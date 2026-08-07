@@ -10,6 +10,7 @@ router.use(authenticate); // Protect all routes below
 router.get('/qr', whatsappController.getQrCode);
 router.get('/status', whatsappController.getStatus);
 router.post('/retry', whatsappController.retry);
+router.post('/qr', whatsappController.startQr);
 router.post('/pairing-code', whatsappController.requestPairingCode);
 router.post('/send', whatsappController.sendMessage);
 

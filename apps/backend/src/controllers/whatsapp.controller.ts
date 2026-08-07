@@ -10,6 +10,7 @@ export class WhatsappController {
     this.getQrCode = this.getQrCode.bind(this);
     this.getStatus = this.getStatus.bind(this);
     this.retry = this.retry.bind(this);
+    this.startQr = this.startQr.bind(this);
     this.requestPairingCode = this.requestPairingCode.bind(this);
     this.sendMessage = this.sendMessage.bind(this);
   }
@@ -59,6 +60,27 @@ export class WhatsappController {
       }
 
       const state = await this.whatsappService.retry(business.id);
+      res.status(200).json(state);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Explicitly start the QR flow. GET /qr only reports state now — it no longer
+   * spawns a linking socket — so choosing "Scan QR code" has to say so.
+   */
+  async startQr(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.userId;
+      const business = await prisma.business.findFirst({ where: { userId } });
+
+      if (!business) {
+         res.status(404).json({ error: 'Business not found' });
+         return;
+      }
+
+      const state = await this.whatsappService.startQr(business.id);
       res.status(200).json(state);
     } catch (error) {
       next(error);
